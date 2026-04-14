@@ -149,11 +149,17 @@ function screenToWorld(camera: CameraState, x: number, y: number) {
 
 function canvasPointFromClient(app: Application, clientX: number, clientY: number) {
   const rect = app.canvas.getBoundingClientRect();
-  const scaleX = app.canvas.width / rect.width;
-  const scaleY = app.canvas.height / rect.height;
   return {
-    x: (clientX - rect.left) * scaleX,
-    y: (clientY - rect.top) * scaleY,
+    x: clientX - rect.left,
+    y: clientY - rect.top,
+  };
+}
+
+function viewportSize(app: Application) {
+  const rect = app.canvas.getBoundingClientRect();
+  return {
+    width: rect.width,
+    height: rect.height,
   };
 }
 
@@ -257,14 +263,15 @@ export function PixiBattlefield({
       resizeTo: hostRef.current,
       antialias: true,
       background: new Color("#25180f"),
-      resolution: window.devicePixelRatio || 1,
+      resolution: 1,
     }).then(() => {
       if (disposed || !hostRef.current) return;
       hostRef.current.appendChild(app.canvas);
       appRef.current = app;
 
       const camera = cameraRef.current;
-      centerCamera(camera, app.screen.width, app.screen.height, latestRef.current.snapshot);
+      const viewport = viewportSize(app);
+      centerCamera(camera, viewport.width, viewport.height, latestRef.current.snapshot);
       onWheel = (event: WheelEvent) => {
         event.preventDefault();
         const { x: screenX, y: screenY } = canvasPointFromClient(
@@ -283,7 +290,8 @@ export function PixiBattlefield({
         camera.scale = nextScale;
         camera.x = screenX - worldX * nextScale;
         camera.y = screenY - worldY * nextScale;
-        clampCamera(camera, app.screen.width, app.screen.height, latestRef.current.snapshot);
+        const nextViewport = viewportSize(app);
+        clampCamera(camera, nextViewport.width, nextViewport.height, latestRef.current.snapshot);
         latestRef.current.onCameraAction("zoom");
       };
       onPointerDown = (event: PointerEvent) => {
@@ -314,7 +322,8 @@ export function PixiBattlefield({
         camera.y += dy;
         camera.lastX = point.x;
         camera.lastY = point.y;
-        clampCamera(camera, app.screen.width, app.screen.height, latestRef.current.snapshot);
+        const nextViewport = viewportSize(app);
+        clampCamera(camera, nextViewport.width, nextViewport.height, latestRef.current.snapshot);
       };
       onContextMenu = (event: MouseEvent) => event.preventDefault();
       app.canvas.addEventListener("wheel", onWheel);
@@ -325,7 +334,8 @@ export function PixiBattlefield({
 
       app.ticker.add(() => {
         const latest = latestRef.current;
-        clampCamera(cameraRef.current, app.screen.width, app.screen.height, latest.snapshot);
+        const nextViewport = viewportSize(app);
+        clampCamera(cameraRef.current, nextViewport.width, nextViewport.height, latest.snapshot);
         renderScene(
           app,
           latest.snapshot,
@@ -356,7 +366,8 @@ export function PixiBattlefield({
   useEffect(() => {
     const app = appRef.current;
     if (!app) return;
-    clampCamera(cameraRef.current, app.screen.width, app.screen.height, snapshot);
+    const viewport = viewportSize(app);
+    clampCamera(cameraRef.current, viewport.width, viewport.height, snapshot);
     renderScene(
       app,
       snapshot,
