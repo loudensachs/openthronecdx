@@ -1,5 +1,7 @@
 import type { RuntimeConfig } from "@shared/sim/types";
 
+const FALLBACK_PARTYKIT_HOST = "https://openthronecdx.loudensachs.partykit.dev";
+
 function normalizeHost(host: string) {
   if (!host) return "";
   return host.replace(/\/+$/, "");
@@ -17,12 +19,20 @@ export async function loadRuntimeConfig(): Promise<RuntimeConfig> {
       throw new Error(`runtime-config ${response.status}`);
     }
     const data = (await response.json()) as RuntimeConfig;
+    if (!normalizeHost(data.partykitHost)) {
+      return {
+        partykitHost: FALLBACK_PARTYKIT_HOST,
+      };
+    }
     return {
       partykitHost: normalizeHost(data.partykitHost),
     };
   } catch {
     return {
-      partykitHost: "http://127.0.0.1:1999",
+      partykitHost:
+        typeof window !== "undefined" && window.location.hostname === "localhost"
+          ? "http://127.0.0.1:1999"
+          : FALLBACK_PARTYKIT_HOST,
     };
   }
 }
