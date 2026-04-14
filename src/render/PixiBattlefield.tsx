@@ -481,14 +481,47 @@ function updateProvinceDisplays(
     }
 
     display.sigil.clear();
-    display.sigil.circle(province.center.x, province.center.y + 21, isMine ? 10.5 : 10);
-    display.sigil.fill({ color: isOwned ? ownerTint : 0x25140b, alpha: isMine ? 0.9 : 0.82 });
-    display.sigil.stroke({ color: isMine ? 0xf4d9a4 : 0xe1c690, width: isMine ? 2.8 : 2 });
+    const bx = province.center.x;
+    const by = province.center.y + 22;
+
+    display.sigil.ellipse(bx, by + 4, isMine ? 16 : 14, 6);
+    display.sigil.fill({ color: isOwned ? blendHex(ownerTint, 0x000000, 0.5) : 0x160c07, alpha: 0.85 });
+
+    if (provinceState.building === "village") {
+      const count = Math.min(4, provinceState.buildingLevel + 1);
+      for (let i = 0; i < count; i++) {
+        const ox = bx + (i % 2 === 0 ? i * 4 : -i * 5);
+        const oy = by + (i % 3) * 3 - 2;
+        display.sigil.rect(ox - 3, oy - 4, 6, 4);
+        display.sigil.fill({ color: isOwned ? ownerTint : 0x5a4a3e });
+        display.sigil.poly([ox - 4, oy - 4, ox, oy - 8, ox + 4, oy - 4]);
+        display.sigil.fill({ color: 0x723722 });
+      }
+    } else if (provinceState.building === "tower") {
+      const height = 10 + provinceState.buildingLevel * 3;
+      display.sigil.rect(bx - 4, by - height, 8, height);
+      display.sigil.fill({ color: isOwned ? blendHex(ownerTint, 0x333333, 0.4) : 0x4a4a4a });
+      display.sigil.rect(bx - 5, by - height - 4, 10, 4);
+      display.sigil.fill({ color: 0x222222 });
+      display.sigil.rect(bx - 6, by - height - 6, 3, 2);
+      display.sigil.rect(bx + 3, by - height - 6, 3, 2);
+      display.sigil.fill({ color: 0x222222 });
+    } else if (provinceState.building === "castle") {
+      const size = 8 + provinceState.buildingLevel * 2;
+      display.sigil.rect(bx - size, by - 6, size * 2, 6);
+      display.sigil.fill({ color: 0x444444 });
+      display.sigil.rect(bx - 4, by - 12, 8, 12);
+      display.sigil.fill({ color: isOwned ? blendHex(ownerTint, 0x333333, 0.3) : 0x444444 });
+      display.sigil.rect(bx - size - 2, by - 10, 4, 10);
+      display.sigil.rect(bx + size - 2, by - 10, 4, 10);
+      display.sigil.fill({ color: 0x2a2a2a });
+    }
+
     if (province.coastal) {
-      display.sigil.moveTo(province.center.x - 5, province.center.y + 21);
-      display.sigil.lineTo(province.center.x, province.center.y + 13);
-      display.sigil.lineTo(province.center.x + 5, province.center.y + 21);
-      display.sigil.stroke({ color: 0x86c7d8, width: 2, alpha: 0.8 });
+      display.sigil.moveTo(bx - 7, by + 12);
+      display.sigil.lineTo(bx, by + 5);
+      display.sigil.lineTo(bx + 7, by + 12);
+      display.sigil.stroke({ color: 0x86c7d8, width: 2.5, alpha: 0.9 });
     }
 
     display.purse.visible = isMine && cameraScale >= 0.84;
@@ -528,6 +561,10 @@ function rebuildRoutesAndOverlay(
     const path = route.path.map((provinceId) => scene.byId[provinceId]?.center).filter(Boolean);
     const graphics = new Graphics();
     if (path.length > 1) {
+      const isAttack = snapshot.provinces[route.toProvinceId]?.ownerId !== route.ownerId;
+      const routeColor = Color.shared.setValue(colorForOwner(snapshot, route.ownerId)).toNumber();
+      const strokeColor = isAttack ? blendHex(routeColor, 0xff3300, 0.6) : routeColor;
+
       if (route.mode === "sea" && path.length === 2) {
         const lane = seaLaneControl(snapshot, route.fromProvinceId, route.toProvinceId);
         const control = lane ?? {
@@ -542,37 +579,59 @@ function rebuildRoutesAndOverlay(
           graphics.lineTo(curvePoints[index].x, curvePoints[index].y);
         }
         graphics.stroke({
-          color: Color.shared.setValue(colorForOwner(snapshot, route.ownerId)).toNumber(),
-          width: 3,
-          alpha: 0.72,
+          color: strokeColor,
+          width: isAttack ? 4 : 3,
+          alpha: isAttack ? 0.85 : 0.72,
         });
+
         const t = route.progress / route.totalTicks;
         const marker = quadraticPoint(path[0], control, path[1], t);
-        graphics.circle(marker.x, marker.y, 8);
-        graphics.fill({ color: 0xe8ead6, alpha: 0.95 });
-        graphics.moveTo(marker.x - 7, marker.y + 6);
-        graphics.lineTo(marker.x, marker.y - 10);
-        graphics.lineTo(marker.x + 7, marker.y + 6);
-        graphics.fill({
-          color: Color.shared.setValue(colorForOwner(snapshot, route.ownerId)).toNumber(),
-        });
+        const markerNext = quadraticPoint(path[0], control, path[1], Math.min(1, t + 0.05));
+        const angle = Math.atan2(markerNext.y - marker.y, markerNext.x - marker.x);
+
+        const dirX = Math.cos(angle);
+        const dirY = Math.sin(angle);
+        graphics.moveTo(marker.x + 8 * dirX, marker.y + 8 * dirY);
+        graphics.lineTo(marker.x - 8 * dirX - 6 * dirY, marker.y - 8 * dirY + 6 * dirX);
+        graphics.lineTo(marker.x - 4 * dirX, marker.y - 4 * dirY);
+        graphics.lineTo(marker.x - 8 * dirX + 6 * dirY, marker.y - 8 * dirY - 6 * dirX);
+        graphics.fill({ color: isAttack ? 0xffeaad : 0xe8ead6, alpha: 0.95 });
+        graphics.stroke({ color: strokeColor, width: 2 });
       } else {
         graphics.moveTo(path[0].x, path[0].y);
         for (let index = 1; index < path.length; index += 1) {
           graphics.lineTo(path[index].x, path[index].y);
         }
         graphics.stroke({
-          color: Color.shared.setValue(colorForOwner(snapshot, route.ownerId)).toNumber(),
-          width: 4,
-          alpha: 0.65,
+          color: strokeColor,
+          width: isAttack ? 5 : 4,
+          alpha: isAttack ? 0.8 : 0.65,
         });
-        const currentStep = Math.min(
-          path.length - 1,
-          Math.floor((route.progress / route.totalTicks) * (path.length - 1)),
+
+        const totalSegments = path.length - 1;
+        const progressPerSegment = 1 / totalSegments;
+        const currentSegment = Math.min(
+          totalSegments - 1,
+          Math.floor((route.progress / route.totalTicks) / progressPerSegment)
         );
-        const marker = path[currentStep];
-        graphics.circle(marker.x, marker.y, 6);
-        graphics.fill({ color: 0xf6ddb8 });
+        const localProgress = ((route.progress / route.totalTicks) - currentSegment * progressPerSegment) / progressPerSegment;
+
+        const p1 = path[currentSegment];
+        const p2 = path[currentSegment + 1];
+        const marker = {
+          x: p1.x + (p2.x - p1.x) * localProgress,
+          y: p1.y + (p2.y - p1.y) * localProgress,
+        };
+        const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+
+        const dirX = Math.cos(angle);
+        const dirY = Math.sin(angle);
+        graphics.moveTo(marker.x + 8 * dirX, marker.y + 8 * dirY);
+        graphics.lineTo(marker.x - 8 * dirX - 7 * dirY, marker.y - 8 * dirY + 7 * dirX);
+        graphics.lineTo(marker.x - 4 * dirX, marker.y - 4 * dirY);
+        graphics.lineTo(marker.x - 8 * dirX + 7 * dirY, marker.y - 8 * dirY - 7 * dirX);
+        graphics.fill({ color: isAttack ? 0xffeaad : 0xf6ddb8 });
+        graphics.stroke({ color: strokeColor, width: 2 });
       }
       scene.routeLayer.addChild(graphics);
     } else {
