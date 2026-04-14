@@ -216,10 +216,14 @@ export function createMatchState(
     provinces[province.id] = {
       id: province.id,
       ownerId: spawnPlayer?.id ?? null,
-      levies: spawnPlayer ? 26 : province.building === "fort" ? 12 : 8,
+      levies: spawnPlayer
+        ? BALANCE.ownedStartingLevies
+        : province.building === "fort"
+          ? BALANCE.neutralFortLevies
+          : BALANCE.neutralStartingLevies,
       building: province.building,
       buildingLevel: province.buildingLevel,
-      coinReserve: spawnPlayer ? 18 : 0,
+      coinReserve: spawnPlayer ? BALANCE.ownedStartingCoins : 0,
     };
   }
 
@@ -362,7 +366,7 @@ function computeTravelTicks(map: MapDefinition, path: string[], building: Buildi
     const next = byId[path[index + 1]];
     total += Math.ceil(
       distance(current.center, next.center) /
-        32 /
+        BALANCE.landTravelDivisor /
         (BALANCE.terrainTravel[next.terrain] * BALANCE.building[building].travelModifier),
     );
   }
@@ -382,7 +386,9 @@ function computeSeaTravelTicks(
   return Math.max(
     8,
     Math.ceil(
-      rawDistance / 24 / (BALANCE.boatTravelMultiplier * BALANCE.building[building].travelModifier),
+      rawDistance /
+        BALANCE.seaTravelDivisor /
+        (BALANCE.boatTravelMultiplier * BALANCE.building[building].travelModifier),
     ),
   );
 }
@@ -498,7 +504,8 @@ function resolveRouteArrival(state: MatchState, route: RouteState) {
 
   const defenderPower = target.levies * provinceDefense(targetDefinition, target);
   const attackPower =
-    route.amount * (!target.ownerId ? BALANCE.unownedCapturePenalty : 1);
+    route.amount *
+    (!target.ownerId ? BALANCE.unownedCapturePenalty : BALANCE.occupiedCapturePenalty);
 
   if (attackPower > defenderPower) {
     const remainder = Math.max(1, Math.round((attackPower - defenderPower) / provinceDefense(targetDefinition, target)));

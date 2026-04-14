@@ -4,9 +4,9 @@ import { MAPS } from "@shared/maps";
 describe("map pack", () => {
   it("ships the three intended maps with the planned province counts", () => {
     const counts = Object.fromEntries(MAPS.map((map) => [map.id, map.provinces.length]));
-    expect(counts["crownfall"]).toBe(40);
-    expect(counts["thornmarch"]).toBe(48);
-    expect(counts["ashen-strait"]).toBe(44);
+    expect(counts["crownfall"]).toBe(72);
+    expect(counts["thornmarch"]).toBe(84);
+    expect(counts["ashen-strait"]).toBe(78);
   });
 
   it("keeps adjacency symmetric", () => {

@@ -20,7 +20,14 @@ export interface BalanceConfig {
   defaultSendRatio: number;
   sendRatioOptions: number[];
   unownedCapturePenalty: number;
+  occupiedCapturePenalty: number;
   boatTravelMultiplier: number;
+  landTravelDivisor: number;
+  seaTravelDivisor: number;
+  ownedStartingLevies: number;
+  neutralStartingLevies: number;
+  neutralFortLevies: number;
+  ownedStartingCoins: number;
   building: Record<BuildingKind, BuildingBalance>;
   terrainDefense: Record<TerrainKind, number>;
   terrainTravel: Record<TerrainKind, number>;
@@ -35,34 +42,41 @@ export const BALANCE: BalanceConfig = {
   maxBuildingLevel: 3,
   defaultSendRatio: 0.5,
   sendRatioOptions: [0.25, 0.5, 1],
-  unownedCapturePenalty: 0.85,
+  unownedCapturePenalty: 0.72,
+  occupiedCapturePenalty: 0.88,
   boatTravelMultiplier: 0.78,
+  landTravelDivisor: 19,
+  seaTravelDivisor: 15,
+  ownedStartingLevies: 32,
+  neutralStartingLevies: 12,
+  neutralFortLevies: 18,
+  ownedStartingCoins: 20,
   building: {
     castle: {
       levyPerTick: 0.26,
       coinPerTick: 0.19,
-      defenseMultiplier: 1.7,
+      defenseMultiplier: 1.9,
       upgradeCost: 16,
       travelModifier: 1,
     },
     village: {
       levyPerTick: 0.33,
       coinPerTick: 0.28,
-      defenseMultiplier: 0.95,
+      defenseMultiplier: 1.05,
       upgradeCost: 12,
       travelModifier: 1,
     },
     fort: {
       levyPerTick: 0.18,
       coinPerTick: 0.14,
-      defenseMultiplier: 1.85,
+      defenseMultiplier: 2.05,
       upgradeCost: 14,
       travelModifier: 1,
     },
     tower: {
       levyPerTick: 0.22,
       coinPerTick: 0.17,
-      defenseMultiplier: 1.2,
+      defenseMultiplier: 1.32,
       upgradeCost: 13,
       travelModifier: 0.92,
     },

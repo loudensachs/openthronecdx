@@ -31,11 +31,11 @@ describe("simulation engine", () => {
         playerId: host.id,
         fromProvinceId: source.id,
         toProvinceId: target.id,
-        ratio: 0.5,
+        ratio: 1,
       },
     ]);
 
-    for (let index = 0; index < 32; index += 1) {
+    for (let index = 0; index < 140; index += 1) {
       current = tickMatch(current, []);
     }
 
