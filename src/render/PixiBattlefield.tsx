@@ -9,6 +9,7 @@ type BattlefieldProps = {
   hoveredProvinceId: string | null;
   sendPreviewTargetId: string | null;
   tutorialHighlights: Array<{ provinceId: string; label: string }>;
+  onCameraAction: (action: "pan" | "zoom") => void;
   onProvinceHover: (provinceId: string | null) => void;
   onProvincePointerDown: (provinceId: string) => void;
   onProvincePointerUp: (provinceId: string) => void;
@@ -30,6 +31,7 @@ type LatestRenderState = Pick<
   | "hoveredProvinceId"
   | "sendPreviewTargetId"
   | "tutorialHighlights"
+  | "onCameraAction"
   | "onProvinceHover"
   | "onProvincePointerDown"
   | "onProvincePointerUp"
@@ -50,17 +52,31 @@ function colorForOwner(snapshot: MatchSnapshot, ownerId: string | null) {
   return snapshot.players[ownerId]?.bannerColor ?? "#7c6040";
 }
 
-function terrainTint(terrain: string) {
+function terrainBaseTint(terrain: string) {
   switch (terrain) {
     case "forest":
-      return 0x385436;
+      return 0x4b5b42;
     case "hills":
-      return 0x6d6248;
+      return 0x71644d;
     case "marsh":
-      return 0x50645b;
+      return 0x596259;
     default:
-      return 0x78624b;
+      return 0x6a6658;
   }
+}
+
+function blendHex(base: number, overlay: number, amount: number) {
+  const clamped = clamp(amount, 0, 1);
+  const br = (base >> 16) & 0xff;
+  const bg = (base >> 8) & 0xff;
+  const bb = base & 0xff;
+  const or = (overlay >> 16) & 0xff;
+  const og = (overlay >> 8) & 0xff;
+  const ob = overlay & 0xff;
+  const rr = Math.round(br + (or - br) * clamped);
+  const rg = Math.round(bg + (og - bg) * clamped);
+  const rb = Math.round(bb + (ob - bb) * clamped);
+  return (rr << 16) | (rg << 8) | rb;
 }
 
 function seaLaneControl(snapshot: MatchSnapshot, fromProvinceId: string, toProvinceId: string) {
@@ -171,27 +187,13 @@ function centerCamera(
   clampCamera(camera, viewportWidth, viewportHeight, snapshot);
 }
 
-function provinceAtScreenPoint(
-  snapshot: MatchSnapshot,
-  camera: CameraState,
-  screenX: number,
-  screenY: number,
-) {
-  const worldPoint = screenToWorld(camera, screenX, screenY);
-  for (let index = snapshot.map.provinces.length - 1; index >= 0; index -= 1) {
-    const province = snapshot.map.provinces[index];
-    if (pointInPolygon(worldPoint, province.polygon)) return province.id;
-  }
-  return null;
-}
-
 export function PixiBattlefield({
   snapshot,
-  me,
   selectedProvinceId,
   hoveredProvinceId,
   sendPreviewTargetId,
   tutorialHighlights,
+  onCameraAction,
   onProvinceHover,
   onProvincePointerDown,
   onProvincePointerUp,
@@ -212,6 +214,7 @@ export function PixiBattlefield({
     hoveredProvinceId,
     sendPreviewTargetId,
     tutorialHighlights,
+    onCameraAction,
     onProvinceHover,
     onProvincePointerDown,
     onProvincePointerUp,
@@ -223,6 +226,7 @@ export function PixiBattlefield({
     hoveredProvinceId,
     sendPreviewTargetId,
     tutorialHighlights,
+    onCameraAction,
     onProvinceHover,
     onProvincePointerDown,
     onProvincePointerUp,
@@ -237,6 +241,7 @@ export function PixiBattlefield({
     let onPointerUp: (() => void) | null = null;
     let onPointerMove: ((event: PointerEvent) => void) | null = null;
     let onContextMenu: ((event: MouseEvent) => void) | null = null;
+    let hasDragged = false;
 
     void app.init({
       resizeTo: hostRef.current,
@@ -257,36 +262,40 @@ export function PixiBattlefield({
         const screenY = event.clientY - rect.top;
         const worldX = (screenX - camera.x) / camera.scale;
         const worldY = (screenY - camera.y) / camera.scale;
-        const delta = event.deltaY > 0 ? -0.08 : 0.08;
-        const nextScale = clamp(camera.scale + delta, MIN_SCALE, MAX_SCALE);
+        const nextScale = clamp(
+          camera.scale * Math.exp(-event.deltaY * 0.0014),
+          MIN_SCALE,
+          MAX_SCALE,
+        );
+        if (Math.abs(nextScale - camera.scale) < 0.0001) return;
         camera.scale = nextScale;
         camera.x = screenX - worldX * nextScale;
         camera.y = screenY - worldY * nextScale;
         clampCamera(camera, app.screen.width, app.screen.height, latestRef.current.snapshot);
+        latestRef.current.onCameraAction("zoom");
       };
       onPointerDown = (event: PointerEvent) => {
-        const rect = app.canvas.getBoundingClientRect();
-        const screenX = event.clientX - rect.left;
-        const screenY = event.clientY - rect.top;
-        const clickedProvinceId = provinceAtScreenPoint(
-          latestRef.current.snapshot,
-          camera,
-          screenX,
-          screenY,
-        );
-        const wantsPan = event.button === 1 || event.button === 2 || !clickedProvinceId;
+        const wantsPan = event.button === 2;
         if (!wantsPan) return;
+        event.preventDefault();
         camera.dragging = true;
+        hasDragged = false;
         camera.lastX = event.clientX;
         camera.lastY = event.clientY;
+        app.canvas.style.cursor = "grabbing";
       };
       onPointerUp = () => {
         camera.dragging = false;
+        app.canvas.style.cursor = "default";
       };
       onPointerMove = (event: PointerEvent) => {
         if (!camera.dragging) return;
         const dx = event.clientX - camera.lastX;
         const dy = event.clientY - camera.lastY;
+        if (!hasDragged && Math.hypot(dx, dy) > 3) {
+          latestRef.current.onCameraAction("pan");
+          hasDragged = true;
+        }
         camera.x += dx;
         camera.y += dy;
         camera.lastX = event.clientX;
@@ -355,7 +364,6 @@ export function PixiBattlefield({
     sendPreviewTargetId,
     tutorialHighlights,
     snapshot,
-    me,
   ]);
 
   return <div className="battlefield-host" ref={hostRef} />;
@@ -374,6 +382,7 @@ function renderScene(
   onProvincePointerUp: BattlefieldProps["onProvincePointerUp"],
 ) {
   app.stage.removeChildren();
+  const now = performance.now();
 
   const world = new Container();
   world.position.set(camera.x, camera.y);
@@ -383,18 +392,18 @@ function renderScene(
   const background = new Graphics();
   background.rect(0, 0, snapshot.map.width, snapshot.map.height);
   background.fill({
-    color: 0x102b39,
+    color: 0x0f2c38,
     alpha: 1,
   });
-  background.stroke({ color: 0xd0b17a, width: 10, alpha: 0.35 });
+  background.stroke({ color: 0xc7a66e, width: 8, alpha: 0.3 });
   world.addChild(background);
 
-  for (let index = 0; index < 36; index += 1) {
-    const current = ((index * 53) % snapshot.map.width) + 20;
-    const y = ((index * 157) % snapshot.map.height) + 20;
+  for (let index = 0; index < 52; index += 1) {
+    const current = ((index * 73) % snapshot.map.width) + 18;
+    const y = ((index * 131) % snapshot.map.height) + 26;
     const swell = new Graphics();
-    swell.ellipse(current, y, 18 + (index % 6) * 4, 8 + (index % 4) * 2);
-    swell.stroke({ color: 0x8bb4bf, width: 1, alpha: 0.07 });
+    swell.ellipse(current, y, 26 + (index % 7) * 5, 10 + (index % 5) * 2);
+    swell.stroke({ color: 0x86adbb, width: 1, alpha: 0.05 });
     world.addChild(swell);
   }
 
@@ -405,67 +414,42 @@ function renderScene(
   world.addChild(seaLaneGraphics);
 
   snapshot.map.landmasses.forEach((landmass) => {
-    const coast = new Graphics();
-    const coastPolygon = landmass.polygon.flatMap((point) => [point.x, point.y]);
-    coast.poly(coastPolygon);
-    coast.stroke({ color: 0x26170e, width: 14, alpha: 0.12 });
-    world.addChild(coast);
-
     const land = new Graphics();
     const polygon = landmass.polygon.flatMap((point) => [point.x, point.y]);
     land.poly(polygon);
-    land.fill({ color: 0x5b4d39, alpha: 0.58 });
-    land.stroke({ color: 0xd7ba87, width: 5, alpha: 0.24 });
+    land.fill({ color: 0x4d4b42, alpha: 0.96 });
+    land.stroke({ color: 0x2a2219, width: 7, alpha: 0.42 });
     world.addChild(land);
+
+    const coast = new Graphics();
+    coast.poly(polygon);
+    coast.stroke({ color: 0xc5ae84, width: 3, alpha: 0.55 });
+    world.addChild(coast);
   });
 
   const groupedByCountry = new Map<string, { x: number; y: number; count: number }>();
-  const groupedByContinent = new Map<string, { x: number; y: number; count: number }>();
   snapshot.map.provinces.forEach((province) => {
     const countryGroup = groupedByCountry.get(province.country) ?? { x: 0, y: 0, count: 0 };
     countryGroup.x += province.center.x;
     countryGroup.y += province.center.y;
     countryGroup.count += 1;
     groupedByCountry.set(province.country, countryGroup);
-
-    const continentGroup = groupedByContinent.get(province.continent) ?? { x: 0, y: 0, count: 0 };
-    continentGroup.x += province.center.x;
-    continentGroup.y += province.center.y;
-    continentGroup.count += 1;
-    groupedByContinent.set(province.continent, continentGroup);
   });
 
-  groupedByContinent.forEach((group, continent) => {
+  groupedByCountry.forEach((group, country) => {
     const label = new Text({
-      text: continent.toUpperCase(),
+      text: country.toUpperCase(),
       style: {
         ...WORLD_LABEL_STYLE,
-        fontSize: 34,
-        letterSpacing: 7,
+        fontSize: camera.scale < 0.72 ? 26 : 22,
+        letterSpacing: camera.scale < 0.72 ? 5 : 3,
       },
     });
     label.anchor.set(0.5);
-    label.position.set(group.x / group.count, group.y / group.count - 70);
-    label.alpha = camera.scale > 0.92 ? 0.12 : 0.18;
+    label.position.set(group.x / group.count, group.y / group.count);
+    label.alpha = camera.scale < 0.95 ? 0.14 : 0.08;
     world.addChild(label);
   });
-
-  if (camera.scale > 0.62) {
-    groupedByCountry.forEach((group, country) => {
-      const label = new Text({
-        text: country,
-        style: {
-          ...WORLD_LABEL_STYLE,
-          fontSize: 18,
-          letterSpacing: 2,
-        },
-      });
-      label.anchor.set(0.5);
-      label.position.set(group.x / group.count, group.y / group.count);
-      label.alpha = 0.18;
-      world.addChild(label);
-    });
-  }
 
   for (const seaLane of snapshot.map.seaLanes) {
     const from = byId[seaLane.from];
@@ -535,19 +519,16 @@ function renderScene(
   snapshot.map.provinces.forEach((province) => {
     const provinceState = snapshot.provinces[province.id];
     const ownerColor = colorForOwner(snapshot, provinceState.ownerId);
+    const ownerTint = Color.shared.setValue(ownerColor).toNumber();
+    const fillColor = provinceState.ownerId
+      ? blendHex(terrainBaseTint(province.terrain), ownerTint, selectedProvinceId === province.id ? 0.68 : 0.42)
+      : terrainBaseTint(province.terrain);
     const graphics = new Graphics();
     const polygon = province.polygon.flatMap((point) => [point.x, point.y]);
     graphics.poly(polygon);
     graphics.fill({
-      color: Color.shared.setValue(ownerColor).toNumber(),
-      alpha:
-        selectedProvinceId === province.id
-          ? 0.92
-          : hoveredProvinceId === province.id
-            ? 0.78
-            : provinceState.ownerId
-              ? 0.62
-              : 0.28,
+      color: fillColor,
+      alpha: selectedProvinceId === province.id ? 0.96 : hoveredProvinceId === province.id ? 0.92 : 0.88,
     });
     graphics.stroke({
       color:
@@ -555,17 +536,23 @@ function renderScene(
           ? 0xf8ddb2
           : hoveredProvinceId === province.id
             ? 0xe7d1a3
-            : terrainTint(province.terrain),
-      width: selectedProvinceId === province.id ? 5 : hoveredProvinceId === province.id ? 3 : 2,
-      alpha: 1,
+            : 0x8d7354,
+      width: selectedProvinceId === province.id ? 4.5 : hoveredProvinceId === province.id ? 3.4 : 2.2,
+      alpha: 0.95,
     });
     graphics.eventMode = "static";
     graphics.cursor = "pointer";
     graphics.on("pointerover", () => onProvinceHover(province.id));
     graphics.on("pointermove", () => onProvinceHover(province.id));
     graphics.on("pointerout", () => onProvinceHover(null));
-    graphics.on("pointerdown", () => onProvincePointerDown(province.id));
-    graphics.on("pointerup", () => onProvincePointerUp(province.id));
+    graphics.on("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      onProvincePointerDown(province.id);
+    });
+    graphics.on("pointerup", (event) => {
+      if (event.button !== 0) return;
+      onProvincePointerUp(province.id);
+    });
     world.addChild(graphics);
 
     const label = new Text({
@@ -579,7 +566,7 @@ function renderScene(
           camera.scale < 0.7 ? 11 : province.id === selectedProvinceId ? 15 : 13,
         fill: provinceState.ownerId ? "#fff6e7" : "#d4c5a5",
         align: "center",
-        stroke: { color: "#24120a", width: 3 },
+        stroke: { color: "#24120a", width: 4 },
       },
     });
     label.anchor.set(0.5);
@@ -620,7 +607,14 @@ function renderScene(
     }
   }
 
-  const pulse = 1 + Math.sin(performance.now() / 220) * 0.14;
+  snapshot.map.landmasses.forEach((landmass) => {
+    const coastline = new Graphics();
+    coastline.poly(landmass.polygon.flatMap((point) => [point.x, point.y]));
+    coastline.stroke({ color: 0x1d1610, width: 4, alpha: 0.52 });
+    world.addChild(coastline);
+  });
+
+  const pulse = 1 + Math.sin(now / 220) * 0.14;
   tutorialHighlights.forEach((highlight) => {
     const province = byId[highlight.provinceId];
     if (!province) return;

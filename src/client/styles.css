@@ -282,6 +282,10 @@ select {
   inset: 0;
 }
 
+.battlefield-host canvas {
+  cursor: default;
+}
+
 .top-hud {
   position: absolute;
   top: 1rem;
@@ -385,6 +389,36 @@ select {
 
 .tutorial-hint {
   color: #684a34;
+}
+
+.tutorial-progress {
+  font-weight: 700;
+  color: #684a34;
+}
+
+.tutorial-objectives {
+  display: grid;
+  gap: 0.35rem;
+  max-height: 200px;
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+.tutorial-objective {
+  display: grid;
+  grid-template-columns: 1rem 1fr;
+  gap: 0.55rem;
+  align-items: start;
+  color: #6f5640;
+}
+
+.tutorial-objective.current {
+  color: #2f1c10;
+  font-weight: 700;
+}
+
+.tutorial-objective.done {
+  color: #48633f;
 }
 
 .tutorial-status {

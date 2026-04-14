@@ -74,10 +74,12 @@ describe("simulation engine", () => {
     let lobby = createLobby("room-3", host, "ashen-strait", "private");
     lobby = joinLobby(lobby, rival);
     const match = createMatchState("room-3", { ...lobby, desiredBots: 0, started: true }, getMapById("ashen-strait"));
-    const hostProvince = Object.values(match.provinces).find((province) => province.ownerId === host.id)!;
-    const lane = match.map.seaLanes.find(
-      (entry) => entry.from === hostProvince.id || entry.to === hostProvince.id,
-    )!;
+    const lane = match.map.seaLanes[0]!;
+    match.provinces[lane.from].ownerId = host.id;
+    match.provinces[lane.from].levies = 30;
+    match.provinces[lane.to].ownerId = rival.id;
+    match.provinces[lane.to].levies = 8;
+    const hostProvince = match.provinces[lane.from];
     const targetId = lane.from === hostProvince.id ? lane.to : lane.from;
 
     const next = applyIntents(match, [

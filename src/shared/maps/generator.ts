@@ -35,6 +35,7 @@ type ProvinceSeed = {
   id: string;
   center: MapPoint;
   country: string;
+  continentId: string;
   continent: string;
   polygon: MapPoint[];
   adjacency: string[];
@@ -194,6 +195,101 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
+function pointInPolygon(point: MapPoint, polygon: MapPoint[]) {
+  let inside = false;
+  for (let current = 0, previous = polygon.length - 1; current < polygon.length; previous = current++) {
+    const a = polygon[current];
+    const b = polygon[previous];
+    const intersects =
+      a.y > point.y !== b.y > point.y &&
+      point.x < ((b.x - a.x) * (point.y - a.y)) / ((b.y - a.y) || 1e-6) + a.x;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function dedupePolygon(polygon: MapPoint[]) {
+  const deduped: MapPoint[] = [];
+  for (const point of polygon) {
+    const previous = deduped[deduped.length - 1];
+    if (!previous || distance(previous, point) > 0.5) {
+      deduped.push(point);
+    }
+  }
+  if (deduped.length > 1 && distance(deduped[0], deduped[deduped.length - 1]) < 0.5) {
+    deduped.pop();
+  }
+  return deduped;
+}
+
+function simplifyPolygon(polygon: MapPoint[]) {
+  if (polygon.length <= 3) return polygon;
+  const simplified: MapPoint[] = [];
+  for (let index = 0; index < polygon.length; index += 1) {
+    const previous = polygon[(index - 1 + polygon.length) % polygon.length];
+    const current = polygon[index];
+    const next = polygon[(index + 1) % polygon.length];
+    const vx1 = current.x - previous.x;
+    const vy1 = current.y - previous.y;
+    const vx2 = next.x - current.x;
+    const vy2 = next.y - current.y;
+    const cross = Math.abs(vx1 * vy2 - vy1 * vx2);
+    if (cross > 0.4 || distance(previous, current) > 14) {
+      simplified.push(current);
+    }
+  }
+  return simplified.length >= 3 ? simplified : polygon;
+}
+
+function intersectSegmentWithBisector(
+  start: MapPoint,
+  end: MapPoint,
+  midpoint: MapPoint,
+  normal: MapPoint,
+) {
+  const d1 = (start.x - midpoint.x) * normal.x + (start.y - midpoint.y) * normal.y;
+  const d2 = (end.x - midpoint.x) * normal.x + (end.y - midpoint.y) * normal.y;
+  const denominator = d1 - d2;
+  const t = Math.abs(denominator) < 1e-6 ? 0 : d1 / denominator;
+  return {
+    x: start.x + (end.x - start.x) * t,
+    y: start.y + (end.y - start.y) * t,
+  };
+}
+
+function clipPolygonWithBisector(polygon: MapPoint[], self: MapPoint, other: MapPoint) {
+  if (polygon.length === 0) return polygon;
+  const midpoint = {
+    x: (self.x + other.x) / 2,
+    y: (self.y + other.y) / 2,
+  };
+  const normal = {
+    x: other.x - self.x,
+    y: other.y - self.y,
+  };
+  const result: MapPoint[] = [];
+
+  for (let index = 0; index < polygon.length; index += 1) {
+    const start = polygon[index];
+    const end = polygon[(index + 1) % polygon.length];
+    const startInside =
+      (start.x - midpoint.x) * normal.x + (start.y - midpoint.y) * normal.y <= 1e-6;
+    const endInside =
+      (end.x - midpoint.x) * normal.x + (end.y - midpoint.y) * normal.y <= 1e-6;
+
+    if (startInside && endInside) {
+      result.push(end);
+    } else if (startInside && !endInside) {
+      result.push(intersectSegmentWithBisector(start, end, midpoint, normal));
+    } else if (!startInside && endInside) {
+      result.push(intersectSegmentWithBisector(start, end, midpoint, normal));
+      result.push(end);
+    }
+  }
+
+  return simplifyPolygon(dedupePolygon(result));
+}
+
 function linearlySampleLand(
   blueprint: MapBlueprint,
   x1: number,
@@ -246,10 +342,16 @@ function generateLandmasses(blueprint: MapBlueprint): LandmassDefinition[] {
   const random = createSeededRandom(`${blueprint.seed}:landmasses`);
   return blueprint.continents.map((continent) => {
     const polygon: MapPoint[] = [];
-    const steps = 28;
+    const steps = 54;
+    const rotation = randomBetween(random, 0, Math.PI * 2);
+    const seed = hashString(`${blueprint.seed}:${continent.id}:shore`);
     for (let index = 0; index < steps; index += 1) {
-      const angle = (Math.PI * 2 * index) / steps;
-      const radiusJitter = 0.84 + random() * 0.28;
+      const angle = rotation + (Math.PI * 2 * index) / steps;
+      const waveA = Math.sin(angle * 3 + seed * 0.0008) * 0.12;
+      const waveB = Math.cos(angle * 5 - seed * 0.0006) * 0.08;
+      const waveC = Math.sin(angle * 7 + seed * 0.0004) * 0.05;
+      const coastalNotch = Math.cos(angle - seed * 0.0005) * 0.04;
+      const radiusJitter = 0.86 + waveA + waveB + waveC + coastalNotch + randomBetween(random, -0.03, 0.03);
       const x = continent.center.x + Math.cos(angle) * continent.radiusX * radiusJitter;
       const y = continent.center.y + Math.sin(angle) * continent.radiusY * radiusJitter;
       polygon.push({
@@ -265,12 +367,14 @@ function generateLandmasses(blueprint: MapBlueprint): LandmassDefinition[] {
   });
 }
 
-function generateProvinceCenters(blueprint: MapBlueprint) {
+function generateProvinceCenters(blueprint: MapBlueprint, landmasses: LandmassDefinition[]) {
   const random = createSeededRandom(`${blueprint.seed}:centers`);
+  const landmassById = Object.fromEntries(landmasses.map((landmass) => [landmass.id, landmass]));
   const centers: Array<{
     id: string;
     center: MapPoint;
     country: string;
+    continentId: string;
     continent: string;
   }> = [];
   const margin = 120;
@@ -282,13 +386,19 @@ function generateProvinceCenters(blueprint: MapBlueprint) {
       const x = randomBetween(random, margin, blueprint.width - margin);
       const y = randomBetween(random, margin, blueprint.height - margin);
       if (landScore(blueprint, x, y) < threshold) continue;
-      const tooClose = centers.some((entry) => distance(entry.center, { x, y }) < minSpacing);
-      if (tooClose) continue;
       const continent = nearestContinent(blueprint, { x, y });
+      const landmass = landmassById[continent.id];
+      if (!landmass || !pointInPolygon({ x, y }, landmass.polygon)) continue;
+      const tooClose = centers.some(
+        (entry) =>
+          entry.continentId === continent.id && distance(entry.center, { x, y }) < minSpacing,
+      );
+      if (tooClose) continue;
       centers.push({
         id: `${blueprint.id}_${centers.length}`,
         center: { x, y },
         country: sample(random, continent.countries),
+        continentId: continent.id,
         continent: continent.name,
       });
     }
@@ -301,57 +411,27 @@ function generateProvinceCenters(blueprint: MapBlueprint) {
   return centers;
 }
 
-function pointBelongsToProvince(
-  point: MapPoint,
-  self: { center: MapPoint },
-  others: Array<{ center: MapPoint }>,
-) {
-  const myDistance = distance(point, self.center);
-  const closestOther = others.reduce((best, entry) => Math.min(best, distance(point, entry.center)), Infinity);
-  return myDistance <= closestOther * 1.08;
-}
-
 function buildProvincePolygon(
-  blueprint: MapBlueprint,
-  center: { center: MapPoint },
-  allCenters: Array<{ center: MapPoint }>,
-  random: () => number,
+  landmassPolygon: MapPoint[],
+  center: { id: string; center: MapPoint; continentId: string },
+  allCenters: Array<{ id: string; center: MapPoint; continentId: string }>,
 ) {
-  const nearest = allCenters
-    .filter((entry) => entry !== center)
-    .map((entry) => distance(entry.center, center.center))
-    .sort((a, b) => a - b)[0];
-  const baseRadius = clamp(nearest * 0.47, 46, 116);
-  const steps = 9 + Math.floor(random() * 4);
-  const polygon: MapPoint[] = [];
+  let polygon = landmassPolygon.map((point) => ({ ...point }));
+  const contenders = allCenters
+    .filter(
+      (entry) => entry.id !== center.id && entry.continentId === center.continentId,
+    )
+    .sort(
+      (left, right) =>
+        distance(left.center, center.center) - distance(right.center, center.center),
+    );
 
-  for (let index = 0; index < steps; index += 1) {
-    const angle = (Math.PI * 2 * index) / steps + randomBetween(random, -0.14, 0.14);
-    let radius = baseRadius * randomBetween(random, 0.8, 1.18);
-
-    for (let attempt = 0; attempt < 14; attempt += 1) {
-      const candidate = {
-        x: center.center.x + Math.cos(angle) * radius,
-        y: center.center.y + Math.sin(angle) * radius,
-      };
-      if (
-        landScore(blueprint, candidate.x, candidate.y) > -0.035 &&
-        pointBelongsToProvince(candidate, center, allCenters)
-      ) {
-        polygon.push(candidate);
-        break;
-      }
-      radius *= 0.88;
-      if (attempt === 13) {
-        polygon.push({
-          x: center.center.x + Math.cos(angle) * radius,
-          y: center.center.y + Math.sin(angle) * radius,
-        });
-      }
-    }
+  for (const contender of contenders) {
+    polygon = clipPolygonWithBisector(polygon, center.center, contender.center);
+    if (polygon.length < 3) break;
   }
 
-  return polygon;
+  return simplifyPolygon(dedupePolygon(polygon));
 }
 
 function detectTerrain(
@@ -619,11 +699,14 @@ function assignSpawns(provinces: ProvinceSeed[], blueprint: MapBlueprint) {
 
 export function generateMap(blueprint: MapBlueprint): MapDefinition {
   const random = createSeededRandom(`${blueprint.seed}:map`);
-  const centerSeeds = generateProvinceCenters(blueprint);
+  const landmasses = generateLandmasses(blueprint);
+  const landmassById = Object.fromEntries(landmasses.map((landmass) => [landmass.id, landmass]));
+  const centerSeeds = generateProvinceCenters(blueprint, landmasses);
   const usedNames = new Set<string>();
 
   const provinces: ProvinceSeed[] = centerSeeds.map((seed, index, all) => {
-    const polygon = buildProvincePolygon(blueprint, seed, all, random);
+    const landmassPolygon = landmassById[seed.continentId]?.polygon ?? landmasses[0].polygon;
+    const polygon = buildProvincePolygon(landmassPolygon, seed, all);
     const coastal = polygon.some((point) => landScore(blueprint, point.x, point.y) < 0.08);
     const terrain = detectTerrain(blueprint, seed.center, coastal);
     const building: BuildingKind =
@@ -633,6 +716,7 @@ export function generateMap(blueprint: MapBlueprint): MapDefinition {
       id: seed.id,
       center: seed.center,
       country: seed.country,
+      continentId: seed.continentId,
       continent: seed.continent,
       polygon,
       adjacency: [],
@@ -659,7 +743,6 @@ export function generateMap(blueprint: MapBlueprint): MapDefinition {
 
   assignSpawns(provinces, blueprint);
   const seaLanes = buildSeaLanes(blueprint, provinces, adjacency);
-  const landmasses = generateLandmasses(blueprint);
 
   return mapDefinitionSchema.parse({
     id: blueprint.id,

@@ -142,6 +142,7 @@ export function App() {
   const [coinIndicators, setCoinIndicators] = useState<CoinIndicator[]>([]);
   const [tutorialMode, setTutorialMode] = useState(false);
   const [tutorialStep, setTutorialStep] = useState(0);
+  const [tutorialCamera, setTutorialCamera] = useState({ pan: false, zoom: false });
   const previousCoinsRef = useRef<number | null>(null);
   const coinGainBufferRef = useRef(0);
   const pendingSpendRef = useRef<{ label: string; expiresAtTick: number } | null>(null);
@@ -231,6 +232,7 @@ export function App() {
     setPanelOpen(true);
     setPaused(false);
     setCoinIndicators([]);
+    setTutorialCamera({ pan: false, zoom: false });
     previousCoinsRef.current = null;
     coinGainBufferRef.current = 0;
     pendingSpendRef.current = null;
@@ -291,16 +293,18 @@ export function App() {
 
     const ownedCount = Object.values(snapshot.provinces).filter((province) => province.ownerId === me).length;
     const hasSentLevies = (snapshot.stats.troopsSent[me] ?? 0) > baseline.troopsSent;
-    const hasChangedBuilding = Object.values(snapshot.provinces).some((province) => {
-      if (province.ownerId !== me) return false;
-      const initial = baseline.provinceStates[province.id];
-      return initial ? province.building !== initial.building : false;
-    });
-    const hasUpgradedBuilding = Object.values(snapshot.provinces).some((province) => {
-      if (province.ownerId !== me) return false;
-      const initial = baseline.provinceStates[province.id];
-      return initial ? province.buildingLevel > initial.buildingLevel : false;
-    });
+    const objectiveProvinceId = plan.expansionProvinceId ?? plan.startProvinceId;
+    const objectiveProvince = snapshot.provinces[objectiveProvinceId];
+    const objectiveInitial = baseline.provinceStates[objectiveProvinceId];
+    const hasChangedBuilding =
+      !!objectiveProvince &&
+      !!objectiveInitial &&
+      objectiveProvince.building === plan.recommendedBuilding &&
+      objectiveProvince.building !== objectiveInitial.building;
+    const hasUpgradedBuilding =
+      !!objectiveProvince &&
+      !!objectiveInitial &&
+      objectiveProvince.buildingLevel > objectiveInitial.buildingLevel;
 
     if (tutorialStep === 1 && selectedProvinceId && snapshot.provinces[selectedProvinceId]?.ownerId === me) {
       setTutorialStep(2);
@@ -308,21 +312,49 @@ export function App() {
       setTutorialStep(3);
     } else if (tutorialStep === 3 && ownedCount > baseline.ownedCount) {
       setTutorialStep(4);
+    } else if (tutorialStep === 4 && tutorialCamera.pan) {
+      setTutorialStep(5);
+    } else if (tutorialStep === 5 && tutorialCamera.zoom) {
+      setTutorialStep(6);
     } else if (
-      tutorialStep === 4 &&
+      tutorialStep === 6 &&
       activeTab === "build" &&
-      selectedProvinceId &&
+      selectedProvinceId === objectiveProvinceId &&
       snapshot.provinces[selectedProvinceId]?.ownerId === me
     ) {
-      setTutorialStep(5);
-    } else if (tutorialStep === 5 && hasChangedBuilding) {
-      setTutorialStep(6);
-    } else if (tutorialStep === 6 && hasUpgradedBuilding) {
       setTutorialStep(7);
-    } else if (tutorialStep === 7 && hoveredProvinceMeta?.coastal) {
+    } else if (tutorialStep === 7 && hasChangedBuilding) {
       setTutorialStep(8);
+    } else if (tutorialStep === 8 && hasUpgradedBuilding) {
+      setTutorialStep(9);
+    } else if (
+      tutorialStep === 9 &&
+      (hoveredProvinceId === plan.coastalProvinceId || hoveredProvinceId === plan.coastalPartnerId)
+    ) {
+      setTutorialStep(10);
     }
-  }, [activeTab, hoveredProvinceMeta?.coastal, me, selectedProvinceId, snapshot, tutorialMode, tutorialStep]);
+  }, [
+    activeTab,
+    hoveredProvinceId,
+    me,
+    selectedProvinceId,
+    snapshot,
+    tutorialCamera.pan,
+    tutorialCamera.zoom,
+    tutorialMode,
+    tutorialStep,
+  ]);
+
+  useEffect(() => {
+    if (!tutorialMode) return;
+    if (tutorialStep >= 6 && tutorialStep <= 8) {
+      setPanelOpen(true);
+      setActiveTab("build");
+    } else if (tutorialStep >= 1) {
+      setPanelOpen(true);
+      setActiveTab("chronicle");
+    }
+  }, [tutorialMode, tutorialStep]);
 
   function wireHandlers() {
     return {
@@ -454,6 +486,20 @@ export function App() {
   const selectedProvinceUpgradeCost = selectedProvince
     ? BALANCE.building[selectedProvince.building].upgradeCost + selectedProvince.buildingLevel * 5
     : 0;
+  const tutorialObjectiveProvinceId = tutorialPlan?.expansionProvinceId ?? tutorialPlan?.startProvinceId ?? null;
+  const tutorialObjectives = [
+    "Read the lesson briefing",
+    "Select your opening realm",
+    "Send levies to the marked neutral land",
+    "Wait for the capture to resolve",
+    "Right-drag to pan the map",
+    "Use the mouse wheel to zoom at the cursor",
+    "Select the captured land and open Build",
+    "Refit that province",
+    "Upgrade the same province",
+    "Hover a highlighted harbor to inspect naval play",
+    "Complete the lesson",
+  ];
   const tutorialHighlights: TutorialHighlight[] = (() => {
     if (!tutorialMode || !tutorialPlan) return [];
     if (tutorialStep === 1) {
@@ -468,7 +514,10 @@ export function App() {
     if (tutorialStep === 3 && tutorialPlan.expansionProvinceId) {
       return [{ provinceId: tutorialPlan.expansionProvinceId, label: "Wait for capture" }];
     }
-    if (tutorialStep === 7 && tutorialPlan.coastalProvinceId) {
+    if ((tutorialStep === 6 || tutorialStep === 7 || tutorialStep === 8) && tutorialObjectiveProvinceId) {
+      return [{ provinceId: tutorialObjectiveProvinceId, label: "Build here" }];
+    }
+    if (tutorialStep === 9 && tutorialPlan.coastalProvinceId) {
       return [
         { provinceId: tutorialPlan.coastalProvinceId, label: "Inspect this harbor" },
         ...(tutorialPlan.coastalPartnerId
@@ -490,14 +539,18 @@ export function App() {
       case 3:
         return "Watch the Capture";
       case 4:
-        return "Open the Build Yard";
+        return "Pan the Realm";
       case 5:
-        return "Refit a Province";
+        return "Zoom the Map";
       case 6:
-        return "Upgrade the Works";
+        return "Open the Build Yard";
       case 7:
-        return "Inspect the Coast";
+        return "Refit a Province";
       case 8:
+        return "Upgrade the Works";
+      case 9:
+        return "Inspect the Coast";
+      case 10:
         return "Lesson Complete";
       default:
         return "Royal Tutor";
@@ -516,14 +569,18 @@ export function App() {
       case 3:
         return "Routes resolve over time. Watch your banner march and the target change hands when the attack lands.";
       case 4:
-        return "Open the Build tab and select one of your provinces. Every province keeps its own purse for local works.";
+        return "Hold the right mouse button and drag. The lesson is waiting until you pan the camera.";
       case 5:
-        return `Refit a province. A good first example is ${tutorialPlan?.recommendedBuilding ?? "village"}, which shows how costs and income change immediately.`;
+        return "Scroll over the map to zoom toward or away from your cursor. This is how you inspect fronts quickly.";
       case 6:
-        return "Upgrade any owned province once. The panel shows the exact coin cost before you commit.";
+        return `Now select ${tutorialProvinceName(snapshot, tutorialObjectiveProvinceId)} and use the Build tab. The target province is marked on the map.`;
       case 7:
-        return `Hover a coastal port such as ${tutorialProvinceName(snapshot, tutorialPlan?.coastalProvinceId ?? null)}. Coastal provinces can launch ships along the glowing sea lanes.`;
+        return `Refit ${tutorialProvinceName(snapshot, tutorialObjectiveProvinceId)} into a ${tutorialPlan?.recommendedBuilding ?? "village"}. The button already shows the exact local cost.`;
       case 8:
+        return `Upgrade ${tutorialProvinceName(snapshot, tutorialObjectiveProvinceId)} once. The upgrade button shows the precise coin price before you commit.`;
+      case 9:
+        return `Hover a coastal port such as ${tutorialProvinceName(snapshot, tutorialPlan?.coastalProvinceId ?? null)}. Coastal provinces can launch ships along the glowing sea lanes.`;
+      case 10:
         return "You have completed the guided lesson. Keep playing this match or leave the lesson and start a fresh campaign.";
       default:
         return "";
@@ -535,11 +592,15 @@ export function App() {
       case 2:
         return "Tip: 50% send is selected by default, which is enough for early neutrals.";
       case 4:
-        return "Tip: the top Treasury number is your whole realm. The Build tab uses the selected province's local purse.";
+        return "Tip: right-drag never sends units, so it is safe to use while inspecting the front.";
       case 5:
-        return "Tip: villages mint the most coin, towers speed movement, forts harden defense.";
+        return "Tip: the zoom anchor follows your cursor, so scroll directly over the place you want to inspect.";
+      case 6:
+        return "Tip: the top Treasury number is your whole realm. The Build tab uses the selected province's local purse.";
       case 7:
-        return "Tip: drag open water to pan, mouse wheel to zoom, right-drag anywhere to reposition the camera.";
+        return "Tip: villages mint the most coin, towers speed movement, forts harden defense.";
+      case 9:
+        return "Tip: ships travel along the glowing lane, letting you leap coast to coast without a land route.";
       default:
         return "";
     }
@@ -818,6 +879,12 @@ export function App() {
             hoveredProvinceId={hoveredProvinceId}
             sendPreviewTargetId={sendPreviewTargetId}
             tutorialHighlights={tutorialHighlights}
+            onCameraAction={(action) => {
+              if (!tutorialMode) return;
+              setTutorialCamera((current) =>
+                current[action] ? current : { ...current, [action]: true },
+              );
+            }}
             onProvinceHover={(provinceId) => {
               setHoveredProvinceId(provinceId);
               if (selectedProvinceId && provinceId) {
@@ -879,14 +946,34 @@ export function App() {
             <div className="tutorial-card parchment-panel">
               <span className="eyebrow">Guided Tutorial</span>
               <h3>{tutorialTitle}</h3>
+              <div className="tutorial-progress">
+                Step {Math.min(tutorialStep + 1, tutorialObjectives.length)} / {tutorialObjectives.length}
+              </div>
               <p>{tutorialBody}</p>
               {tutorialHint && <p className="tutorial-hint">{tutorialHint}</p>}
+              <div className="tutorial-objectives">
+                {tutorialObjectives.map((objective, index) => (
+                  <div
+                    key={objective}
+                    className={`tutorial-objective ${
+                      index < tutorialStep
+                        ? "done"
+                        : index === tutorialStep
+                          ? "current"
+                          : ""
+                    }`}
+                  >
+                    <span>{index < tutorialStep ? "✓" : index === tutorialStep ? "→" : "•"}</span>
+                    <span>{objective}</span>
+                  </div>
+                ))}
+              </div>
               {tutorialStep === 0 && (
                 <button className="royal-button" onClick={() => setTutorialStep(1)}>
                   Begin Lesson
                 </button>
               )}
-              {tutorialStep === 8 && (
+              {tutorialStep === 10 && (
                 <button
                   className="royal-button"
                   onClick={() => {
@@ -899,7 +986,7 @@ export function App() {
                   Finish Lesson
                 </button>
               )}
-              {tutorialStep > 0 && tutorialStep < 8 && (
+              {tutorialStep > 0 && tutorialStep < 10 && (
                 <div className="tutorial-status">Waiting for your action...</div>
               )}
               <button
