@@ -1,6 +1,6 @@
 import { BALANCE } from "@shared/config/balance";
 import type { BuildingKind, Difficulty } from "@shared/config/balance";
-import type { MapDefinition, ProvinceDefinition } from "@shared/maps/schema";
+import type { MapDefinition, ProvinceDefinition, SeaLaneDefinition } from "@shared/maps/schema";
 import { getBotIntents } from "@shared/bots/planner";
 import type {
   AllianceRequest,
@@ -29,6 +29,14 @@ function buildAdjacency(map: MapDefinition) {
   return Object.fromEntries(map.provinces.map((province) => [province.id, province.adjacency]));
 }
 
+function buildSeaLaneLookup(map: MapDefinition) {
+  const lookup = new Map<string, SeaLaneDefinition>();
+  for (const lane of map.seaLanes) {
+    lookup.set(pairKey(lane.from, lane.to), lane);
+  }
+  return lookup;
+}
+
 function provinceDefense(province: ProvinceDefinition, state: ProvinceState): number {
   return (
     BALANCE.terrainDefense[province.terrain] *
@@ -42,7 +50,6 @@ function canTraverseFriendly(
   playerId: string,
   provinceId: string,
   isTarget: boolean,
-  targetProvinceId: string,
 ): boolean {
   const province = state.provinces[provinceId];
   if (!province) return false;
@@ -204,10 +211,6 @@ export function createMatchState(
     livePlayers.push(players[botId]);
   }
 
-  const spawnProvinces = map.provinces
-    .filter((province) => province.spawnSlot !== null)
-    .sort((a, b) => (a.spawnSlot ?? 0) - (b.spawnSlot ?? 0));
-
   for (const province of map.provinces) {
     const spawnPlayer = province.spawnSlot !== null ? livePlayers[province.spawnSlot] : undefined;
     provinces[province.id] = {
@@ -309,25 +312,42 @@ function sendLevies(
 
   const adjacency = buildAdjacency(state.map);
   const path = breadthFirstPath(fromProvinceId, toProvinceId, adjacency, (nodeId, isTarget) =>
-    canTraverseFriendly(state, playerId, nodeId, isTarget, toProvinceId),
+    canTraverseFriendly(state, playerId, nodeId, isTarget),
   );
 
-  if (!path || path.length < 2) return;
-  if (toProvince.ownerId && areTruced(state, playerId, toProvince.ownerId)) return;
+  const targetOwner = toProvince.ownerId;
+  if (targetOwner && areTruced(state, playerId, targetOwner)) return;
+
+  let routeMode: RouteState["mode"] = "land";
+  let routePath = path;
+
+  if (!routePath || routePath.length < 2) {
+    const fromMeta = state.map.provinces.find((province) => province.id === fromProvinceId);
+    const toMeta = state.map.provinces.find((province) => province.id === toProvinceId);
+    const laneLookup = buildSeaLaneLookup(state.map);
+    const lane = laneLookup.get(pairKey(fromProvinceId, toProvinceId));
+    if (!fromMeta?.coastal || !toMeta?.coastal || !lane) return;
+    routeMode = "sea";
+    routePath = [fromProvinceId, toProvinceId];
+  }
 
   const amount = Math.max(1, Math.floor(fromProvince.levies * ratio));
   if (amount <= 0) return;
 
   fromProvince.levies -= amount;
-  const totalTicks = computeTravelTicks(state.map, path, fromProvince.building);
+  const totalTicks =
+    routeMode === "sea"
+      ? computeSeaTravelTicks(state.map, fromProvinceId, toProvinceId, fromProvince.building)
+      : computeTravelTicks(state.map, routePath, fromProvince.building);
   const routeId = createId("route");
   state.routes[routeId] = {
     id: routeId,
     ownerId: playerId,
+    mode: routeMode,
     amount,
     fromProvinceId,
     toProvinceId,
-    path,
+    path: routePath,
     progress: 0,
     totalTicks,
   };
@@ -349,6 +369,24 @@ function computeTravelTicks(map: MapDefinition, path: string[], building: Buildi
   return Math.max(4, total);
 }
 
+function computeSeaTravelTicks(
+  map: MapDefinition,
+  fromProvinceId: string,
+  toProvinceId: string,
+  building: BuildingKind,
+) {
+  const byId = mapProvinceLookup(map);
+  const from = byId[fromProvinceId];
+  const to = byId[toProvinceId];
+  const rawDistance = distance(from.center, to.center);
+  return Math.max(
+    8,
+    Math.ceil(
+      rawDistance / 24 / (BALANCE.boatTravelMultiplier * BALANCE.building[building].travelModifier),
+    ),
+  );
+}
+
 function changeBuilding(
   state: MatchState,
   playerId: string,
@@ -358,6 +396,7 @@ function changeBuilding(
   const province = state.provinces[provinceId];
   if (!province || province.ownerId !== playerId) return;
   if (province.building === "castle") return;
+  if (province.building === building) return;
   const cost = BALANCE.building[building].upgradeCost;
   if (province.coinReserve < cost) return;
   province.coinReserve -= cost;

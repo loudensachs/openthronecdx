@@ -111,6 +111,17 @@ select {
   min-width: 180px;
 }
 
+.province-inspector {
+  position: absolute;
+  left: 1rem;
+  bottom: 5.75rem;
+  z-index: 3;
+  width: min(280px, calc(100vw - 2rem));
+  display: grid;
+  gap: 0.2rem;
+  pointer-events: none;
+}
+
 .hero-card h1,
 .menu-panel h2,
 .result-panel h2,
@@ -289,6 +300,43 @@ select {
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.28);
 }
 
+.treasury-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.treasury-chip strong {
+  color: #f6d987;
+  font-size: 0.86rem;
+}
+
+.coin-indicator-stack {
+  position: absolute;
+  top: 4.1rem;
+  left: 1rem;
+  z-index: 3;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.coin-indicator {
+  border-radius: 999px;
+  padding: 0.45rem 0.8rem;
+  font-weight: 700;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+}
+
+.coin-indicator.positive {
+  background: rgba(53, 103, 55, 0.88);
+  color: #eef9df;
+}
+
+.coin-indicator.negative {
+  background: rgba(125, 36, 29, 0.9);
+  color: #fff1e7;
+}
+
 .bottom-ratio-bar {
   position: absolute;
   left: 50%;
@@ -315,6 +363,37 @@ select {
   overflow: auto;
 }
 
+.tutorial-card {
+  position: absolute;
+  top: 5.5rem;
+  left: 1rem;
+  z-index: 3;
+  width: min(360px, calc(100vw - 2rem));
+  display: grid;
+  gap: 0.75rem;
+}
+
+.tutorial-card h3 {
+  margin: 0;
+  font-family: "Cinzel", serif;
+}
+
+.tutorial-card p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.tutorial-hint {
+  color: #684a34;
+}
+
+.tutorial-status {
+  border-radius: 14px;
+  background: rgba(72, 48, 28, 0.1);
+  padding: 0.7rem 0.85rem;
+  font-weight: 700;
+}
+
 .panel-tabs {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -334,6 +413,37 @@ select {
 .panel-tabs button.active {
   background: rgba(138, 82, 35, 0.2);
   box-shadow: inset 0 0 0 1px rgba(106, 68, 33, 0.25);
+}
+
+.build-summary {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.build-summary p {
+  margin: 0;
+}
+
+.build-note {
+  margin-top: 0.35rem;
+}
+
+.build-option {
+  border-radius: 18px;
+  display: grid;
+  gap: 0.15rem;
+  justify-items: start;
+  text-align: left;
+}
+
+.build-option:disabled,
+.royal-button:disabled,
+.iron-button:disabled,
+.wax-button:disabled {
+  cursor: not-allowed;
+  filter: saturate(0.55) brightness(0.9);
+  opacity: 0.72;
+  transform: none;
 }
 
 .overlay-screen {
@@ -371,6 +481,13 @@ select {
     width: calc(100vw - 1rem);
     left: 0.5rem;
     right: 0.5rem;
+  }
+
+  .tutorial-card {
+    top: auto;
+    bottom: 5.6rem;
+    left: 0.5rem;
+    width: calc(100vw - 1rem);
   }
 
   .bottom-ratio-bar {

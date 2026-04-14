@@ -19,4 +19,13 @@ describe("map pack", () => {
       }
     }
   });
+
+  it("ships world-map metadata for landmasses and naval routes", () => {
+    for (const map of MAPS) {
+      expect(map.landmasses.length).toBeGreaterThan(0);
+      expect(map.seaLanes.length).toBeGreaterThan(0);
+      expect(map.provinces.some((province) => province.coastal)).toBe(true);
+      expect(map.provinces.every((province) => province.polygon.length >= 3)).toBe(true);
+    }
+  });
 });

@@ -20,6 +20,7 @@ export interface BalanceConfig {
   defaultSendRatio: number;
   sendRatioOptions: number[];
   unownedCapturePenalty: number;
+  boatTravelMultiplier: number;
   building: Record<BuildingKind, BuildingBalance>;
   terrainDefense: Record<TerrainKind, number>;
   terrainTravel: Record<TerrainKind, number>;
@@ -35,6 +36,7 @@ export const BALANCE: BalanceConfig = {
   defaultSendRatio: 0.5,
   sendRatioOptions: [0.25, 0.5, 1],
   unownedCapturePenalty: 0.85,
+  boatTravelMultiplier: 0.78,
   building: {
     castle: {
       levyPerTick: 0.26,

@@ -19,7 +19,17 @@ function validateConnectivity(mapId: string, provinces: string[], adjacency: Rec
 
 for (const map of MAPS) {
   const provinceIds = map.provinces.map((province) => province.id);
-  const adjacency = Object.fromEntries(map.provinces.map((province) => [province.id, province.adjacency]));
+  const seaAdjacency = new Map<string, Set<string>>();
+  for (const province of map.provinces) {
+    seaAdjacency.set(province.id, new Set(province.adjacency));
+  }
+  for (const lane of map.seaLanes) {
+    seaAdjacency.get(lane.from)?.add(lane.to);
+    seaAdjacency.get(lane.to)?.add(lane.from);
+  }
+  const adjacency = Object.fromEntries(
+    map.provinces.map((province) => [province.id, Array.from(seaAdjacency.get(province.id) ?? [])]),
+  );
   const spawnCount = map.provinces.filter((province) => province.spawnSlot !== null).length;
   if (spawnCount < 4) {
     throw new Error(`${map.id}: not enough spawn castles`);

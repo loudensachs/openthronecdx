@@ -34,18 +34,18 @@ OpenThrone is split into four runtime layers:
 - `ClientIntent`: ready/start, levy send, building changes, alliance flow, pause
 - `MatchSnapshot`: reconnect-safe full state
 - `ServerPatch`: changed provinces plus full route/score/diplomacy overlays
-- `MapDefinition`: expanded polygon map graph used by renderer and simulation
+- `MapDefinition`: procedural world-map graph with provinces, countries, continents, landmasses, and sea lanes
 
 ### Map pipeline
 
-- Raw JSON maps live in `src/shared/maps/*.json`.
-- Each file stores authored province placement, terrain, building seeds, spawns, and edge overrides.
-- `src/shared/maps/index.ts` expands those raw descriptors into polygon provinces with adjacency.
+- `src/shared/maps/generator.ts` defines seeded world blueprints for each battlefield.
+- The generator produces original province polygons, adjacency, country labels, continent groupings, coastline landmasses, and ship lanes.
+- `src/shared/maps/index.ts` materializes those generated definitions once for both renderer and simulation.
 - `src/shared/maps/validateMaps.ts` checks connectivity and spawn sanity.
 
 ## Visual Layer
 
-- Pixi draws the parchment battlefield, province polygons, labels, and route banners.
+- Pixi draws the parchment world map, province polygons, continent/country labels, sea lanes, ships, and route banners.
 - React owns menu flow, top HUD, bottom send strip, hover cards, and the single parchment command panel.
 - The renderer is intentionally map-first; interface chrome stays secondary.
 

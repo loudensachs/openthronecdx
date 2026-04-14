@@ -46,6 +46,7 @@ export interface ProvinceState {
 export interface RouteState {
   id: string;
   ownerId: string;
+  mode: "land" | "sea";
   amount: number;
   fromProvinceId: string;
   toProvinceId: string;

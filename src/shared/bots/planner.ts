@@ -10,7 +10,12 @@ function ownedProvinceIds(state: MatchState, playerId: string) {
 function hostileNeighbors(state: MatchState, playerId: string, provinceId: string) {
   const province = state.map.provinces.find((entry) => entry.id === provinceId);
   if (!province) return [];
-  return province.adjacency
+  const coastalTargets = province.coastal
+    ? state.map.seaLanes
+        .filter((lane) => lane.from === provinceId || lane.to === provinceId)
+        .map((lane) => (lane.from === provinceId ? lane.to : lane.from))
+    : [];
+  return [...province.adjacency, ...coastalTargets]
     .map((id) => state.provinces[id])
     .filter((entry): entry is typeof state.provinces[string] => Boolean(entry))
     .filter((entry) => entry.ownerId !== playerId);
