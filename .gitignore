@@ -1,0 +1,6 @@
+node_modules
+dist
+.netlify
+.partykit
+coverage
+.DS_Store
