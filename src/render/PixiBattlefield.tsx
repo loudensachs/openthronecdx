@@ -203,6 +203,22 @@ function centerCamera(
   clampCamera(camera, viewportWidth, viewportHeight, snapshot);
 }
 
+function provinceAtScreenPoint(
+  snapshot: MatchSnapshot,
+  camera: CameraState,
+  screenX: number,
+  screenY: number,
+) {
+  const worldPoint = screenToWorld(camera, screenX, screenY);
+  for (let index = snapshot.map.provinces.length - 1; index >= 0; index -= 1) {
+    const province = snapshot.map.provinces[index];
+    if (pointInPolygon(worldPoint, province.polygon)) {
+      return province.id;
+    }
+  }
+  return null;
+}
+
 export function PixiBattlefield({
   snapshot,
   selectedProvinceId,
@@ -216,6 +232,7 @@ export function PixiBattlefield({
 }: BattlefieldProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<Application | null>(null);
+  const hoveredProvinceRef = useRef<string | null>(null);
   const cameraRef = useRef<CameraState>({
     x: 50,
     y: 40,
@@ -254,10 +271,12 @@ export function PixiBattlefield({
     let disposed = false;
     let onWheel: ((event: WheelEvent) => void) | null = null;
     let onPointerDown: ((event: PointerEvent) => void) | null = null;
-    let onPointerUp: (() => void) | null = null;
+    let onPointerUp: ((event: PointerEvent) => void) | null = null;
     let onPointerMove: ((event: PointerEvent) => void) | null = null;
+    let onPointerLeave: (() => void) | null = null;
     let onContextMenu: ((event: MouseEvent) => void) | null = null;
     let hasDragged = false;
+    let activeButton: number | null = null;
 
     void app.init({
       resizeTo: hostRef.current,
@@ -295,42 +314,110 @@ export function PixiBattlefield({
         latestRef.current.onCameraAction("zoom");
       };
       onPointerDown = (event: PointerEvent) => {
-        const wantsPan = event.button === 2;
-        if (!wantsPan) return;
-        event.preventDefault();
         const point = canvasPointFromClient(app, event.clientX, event.clientY);
+        activeButton = event.button;
+
+        if (event.button === 0) {
+          const provinceId = provinceAtScreenPoint(
+            latestRef.current.snapshot,
+            camera,
+            point.x,
+            point.y,
+          );
+          if (provinceId) {
+            latestRef.current.onProvincePointerDown(provinceId);
+          }
+          return;
+        }
+
+        if (event.button !== 2) return;
+        event.preventDefault();
         camera.dragging = true;
         hasDragged = false;
         camera.lastX = point.x;
         camera.lastY = point.y;
         app.canvas.style.cursor = "grabbing";
       };
-      onPointerUp = () => {
+      onPointerUp = (event?: PointerEvent) => {
+        if (activeButton === 0 && event) {
+          const point = canvasPointFromClient(app, event.clientX, event.clientY);
+          const provinceId = provinceAtScreenPoint(
+            latestRef.current.snapshot,
+            cameraRef.current,
+            point.x,
+            point.y,
+          );
+          if (provinceId) {
+            latestRef.current.onProvincePointerUp(provinceId);
+          }
+        }
+        activeButton = null;
         camera.dragging = false;
-        app.canvas.style.cursor = "default";
+        app.canvas.style.cursor = hoveredProvinceRef.current ? "pointer" : "default";
       };
       onPointerMove = (event: PointerEvent) => {
-        if (!camera.dragging) return;
-        const point = canvasPointFromClient(app, event.clientX, event.clientY);
-        const dx = point.x - camera.lastX;
-        const dy = point.y - camera.lastY;
-        if (!hasDragged && Math.hypot(dx, dy) > 3) {
-          latestRef.current.onCameraAction("pan");
-          hasDragged = true;
+        const rect = app.canvas.getBoundingClientRect();
+        const insideCanvas =
+          event.clientX >= rect.left &&
+          event.clientX <= rect.right &&
+          event.clientY >= rect.top &&
+          event.clientY <= rect.bottom;
+
+        if (camera.dragging) {
+          const point = canvasPointFromClient(app, event.clientX, event.clientY);
+          const dx = point.x - camera.lastX;
+          const dy = point.y - camera.lastY;
+          if (!hasDragged && Math.hypot(dx, dy) > 3) {
+            latestRef.current.onCameraAction("pan");
+            hasDragged = true;
+          }
+          camera.x += dx;
+          camera.y += dy;
+          camera.lastX = point.x;
+          camera.lastY = point.y;
+          const nextViewport = viewportSize(app);
+          clampCamera(camera, nextViewport.width, nextViewport.height, latestRef.current.snapshot);
+          return;
         }
-        camera.x += dx;
-        camera.y += dy;
-        camera.lastX = point.x;
-        camera.lastY = point.y;
-        const nextViewport = viewportSize(app);
-        clampCamera(camera, nextViewport.width, nextViewport.height, latestRef.current.snapshot);
+
+        if (!insideCanvas) {
+          if (hoveredProvinceRef.current !== null) {
+            hoveredProvinceRef.current = null;
+            latestRef.current.onProvinceHover(null);
+            app.canvas.style.cursor = "default";
+          }
+          return;
+        }
+
+        const point = canvasPointFromClient(app, event.clientX, event.clientY);
+        const nextHoveredProvinceId = provinceAtScreenPoint(
+          latestRef.current.snapshot,
+          cameraRef.current,
+          point.x,
+          point.y,
+        );
+        if (hoveredProvinceRef.current !== nextHoveredProvinceId) {
+          hoveredProvinceRef.current = nextHoveredProvinceId;
+          latestRef.current.onProvinceHover(nextHoveredProvinceId);
+          app.canvas.style.cursor = nextHoveredProvinceId ? "pointer" : "default";
+        }
+      };
+      onPointerLeave = () => {
+        if (hoveredProvinceRef.current !== null) {
+          hoveredProvinceRef.current = null;
+          latestRef.current.onProvinceHover(null);
+        }
+        if (!camera.dragging) {
+          app.canvas.style.cursor = "default";
+        }
       };
       onContextMenu = (event: MouseEvent) => event.preventDefault();
       app.canvas.addEventListener("wheel", onWheel);
       app.canvas.addEventListener("pointerdown", onPointerDown);
       app.canvas.addEventListener("contextmenu", onContextMenu);
-      window.addEventListener("pointerup", onPointerUp);
-      window.addEventListener("pointermove", onPointerMove);
+      app.canvas.addEventListener("pointerleave", onPointerLeave);
+      window.addEventListener("pointerup", onPointerUp as EventListener);
+      window.addEventListener("pointermove", onPointerMove as EventListener);
 
       app.ticker.add(() => {
         const latest = latestRef.current;
@@ -356,8 +443,9 @@ export function PixiBattlefield({
       if (onWheel) app.canvas.removeEventListener("wheel", onWheel);
       if (onPointerDown) app.canvas.removeEventListener("pointerdown", onPointerDown);
       if (onContextMenu) app.canvas.removeEventListener("contextmenu", onContextMenu);
-      if (onPointerUp) window.removeEventListener("pointerup", onPointerUp);
-      if (onPointerMove) window.removeEventListener("pointermove", onPointerMove);
+      if (onPointerLeave) app.canvas.removeEventListener("pointerleave", onPointerLeave);
+      if (onPointerUp) window.removeEventListener("pointerup", onPointerUp as EventListener);
+      if (onPointerMove) window.removeEventListener("pointermove", onPointerMove as EventListener);
       app.destroy(true, { children: true });
       appRef.current = null;
     };
@@ -564,19 +652,6 @@ function renderScene(
             : 0x8d7354,
       width: selectedProvinceId === province.id ? 4.5 : hoveredProvinceId === province.id ? 3.4 : 2.2,
       alpha: 0.95,
-    });
-    graphics.eventMode = "static";
-    graphics.cursor = "pointer";
-    graphics.on("pointerover", () => onProvinceHover(province.id));
-    graphics.on("pointermove", () => onProvinceHover(province.id));
-    graphics.on("pointerout", () => onProvinceHover(null));
-    graphics.on("pointerdown", (event) => {
-      if (event.button !== 0) return;
-      onProvincePointerDown(province.id);
-    });
-    graphics.on("pointerup", (event) => {
-      if (event.button !== 0) return;
-      onProvincePointerUp(province.id);
     });
     world.addChild(graphics);
 
