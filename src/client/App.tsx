@@ -215,6 +215,27 @@ export function App() {
     : 0;
 
   const tutorialPlan = tutorialMode ? tutorialPlanRef.current : null;
+  const myOwnedProvinces = useMemo(
+    () =>
+      snapshot
+        ? snapshot.map.provinces
+            .filter((province) => snapshot.provinces[province.id]?.ownerId === me)
+            .map((province) => ({
+              meta: province,
+              state: snapshot.provinces[province.id],
+            }))
+            .sort(
+              (left, right) =>
+                right.state.coinReserve - left.state.coinReserve ||
+                left.meta.name.localeCompare(right.meta.name),
+            )
+        : [],
+    [me, snapshot],
+  );
+  const selectedOwnedProvince =
+    selectedProvince && selectedProvince.ownerId === me && selectedProvinceMeta
+      ? { meta: selectedProvinceMeta, state: selectedProvince }
+      : null;
 
   function beginConnectionSession() {
     sessionRef.current += 1;
@@ -232,6 +253,11 @@ export function App() {
     window.setTimeout(() => {
       setCoinIndicators((current) => current.filter((indicator) => indicator.id !== id));
     }, 1600);
+  }
+
+  function clearSelection() {
+    setSelectedProvinceId(null);
+    setSendPreviewTargetId(null);
   }
 
   function resetMatchUi() {
@@ -287,11 +313,11 @@ export function App() {
           coinGainBufferRef.current += delta;
         } else {
           const pendingSpend = pendingSpendRef.current;
-          const canExplainSpend =
-            pendingSpend &&
-            snapshot.tick <= pendingSpend.expiresAtTick;
+          const canExplainSpend = pendingSpend && snapshot.tick <= pendingSpend.expiresAtTick;
           pushCoinIndicator(
-            canExplainSpend ? `${delta} ${pendingSpend.label}` : `${delta} treasury`,
+            canExplainSpend
+              ? `Spent ${formatCoins(Math.abs(delta))}c on ${pendingSpend.label}`
+              : `Spent ${formatCoins(Math.abs(delta))}c`,
             false,
           );
           pendingSpendRef.current = null;
@@ -302,7 +328,7 @@ export function App() {
       coinGainBufferRef.current > 0 &&
       (snapshot.tick % BALANCE.tickRate === 0 || coinGainBufferRef.current >= 4)
     ) {
-      pushCoinIndicator(`+${coinGainBufferRef.current} treasury`, true);
+      pushCoinIndicator(`+${formatCoins(coinGainBufferRef.current)}c treasury`, true);
       coinGainBufferRef.current = 0;
     }
     previousCoinsRef.current = currentCoins;
@@ -378,6 +404,17 @@ export function App() {
       setActiveTab("chronicle");
     }
   }, [tutorialMode, tutorialStep]);
+
+  useEffect(() => {
+    if (screen !== "match") return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        clearSelection();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [screen]);
 
   function wireHandlers(sessionId: number) {
     return {
@@ -467,15 +504,21 @@ export function App() {
 
   function sendIntent(intent: ClientIntent) {
     if (intent.type === "change-building") {
+      const provinceName =
+        snapshot?.map.provinces.find((province) => province.id === intent.provinceId)?.name ??
+        "province works";
       pendingSpendRef.current = {
-        label: `spent on ${intent.building}`,
+        label: `${provinceName} ${intent.building}`,
         expiresAtTick: (snapshot?.tick ?? 0) + 8,
       };
     } else if (intent.type === "upgrade-building") {
       const province = snapshot?.provinces[intent.provinceId];
       if (province) {
+        const provinceName =
+          snapshot?.map.provinces.find((entry) => entry.id === intent.provinceId)?.name ??
+          intent.provinceId;
         pendingSpendRef.current = {
-          label: `spent on ${province.building} upgrade`,
+          label: `${provinceName} ${province.building} upgrade`,
           expiresAtTick: (snapshot?.tick ?? 0) + 8,
         };
       }
@@ -890,6 +933,19 @@ export function App() {
               <strong>{formatRate(realmCoinIncome)}</strong>
             </div>
             <div className="top-chip">Time {matchMinutesLabel}</div>
+            {selectedOwnedProvince && (
+              <div className="top-chip selected-chip">
+                <div>
+                  <strong>{selectedOwnedProvince.meta.name}</strong>
+                  <span>
+                    Purse {formatCoins(selectedOwnedProvince.state.coinReserve)}c • {formatRate(selectedProvinceIncome)}
+                  </span>
+                </div>
+                <button className="iron-button small top-chip-button" onClick={clearSelection}>
+                  Deselect
+                </button>
+              </div>
+            )}
           </div>
 
           {coinIndicators.length > 0 && (
@@ -928,6 +984,7 @@ export function App() {
             }}
             onProvincePointerDown={handleProvincePointerDown}
             onProvincePointerUp={handleProvincePointerUp}
+            onEmptyLeftClick={clearSelection}
           />
 
           <div className="bottom-ratio-bar parchment-strip">
@@ -966,7 +1023,9 @@ export function App() {
               </span>
               <span>
                 {hoveredProvince.ownerId
-                  ? snapshot.players[hoveredProvince.ownerId]?.name ?? "Held"
+                  ? hoveredProvince.ownerId === me
+                    ? "Your realm"
+                    : snapshot.players[hoveredProvince.ownerId]?.name ?? "Held"
                   : "Neutral"}
               </span>
               <span>Levies {Math.floor(hoveredProvince.levies)}</span>
@@ -1068,6 +1127,38 @@ export function App() {
                   <h3>Kingdom Ledger</h3>
                   <p>Owned provinces: {ownedProvinceIds.length}</p>
                   <p>Treasury income: {formatRate(realmCoinIncome)}</p>
+                  <div className="owned-province-ledger">
+                    {myOwnedProvinces.map(({ meta, state }) => (
+                      <div
+                        key={meta.id}
+                        className={`owned-province-card ${selectedProvinceId === meta.id ? "selected" : ""}`}
+                      >
+                        <div>
+                          <strong>{meta.name}</strong>
+                          <span>
+                            {meta.terrain}
+                            {meta.coastal ? " • coastal" : ""}
+                          </span>
+                        </div>
+                        <div>
+                          <strong>{formatCoins(state.coinReserve)}c</strong>
+                          <span>Purse</span>
+                        </div>
+                        <div>
+                          <strong>
+                            {formatRate(provinceIncomePerSecond(state.building, state.buildingLevel))}
+                          </strong>
+                          <span>Income</span>
+                        </div>
+                        <div>
+                          <strong>
+                            {state.building} Lv.{state.buildingLevel}
+                          </strong>
+                          <span>{Math.floor(state.levies)} levies</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                   <div className="scoreboard-list">
                     {snapshot.scoreboard.map((entry) => (
                       <div key={entry.playerId} className="score-row">
@@ -1178,6 +1269,12 @@ export function App() {
                         </p>
                         <p>Local income: {formatRate(selectedProvinceIncome)}</p>
                         <p>
+                          Next spend:{" "}
+                          {selectedProvince.buildingLevel >= BALANCE.maxBuildingLevel
+                            ? "building fully upgraded"
+                            : `${selectedProvinceUpgradeCost}c from this province`}
+                        </p>
+                        <p>
                           Current works: {selectedProvince.building} Lv.{selectedProvince.buildingLevel}
                         </p>
                         <p className="muted build-note">
@@ -1243,6 +1340,7 @@ export function App() {
                 <div className="panel-body">
                   <h3>Chronicle</h3>
                   <p>Drag from one of your provinces to any adjacent reachable province to send levies.</p>
+                  <p>Click empty land or press Escape to clear a selected province.</p>
                   <p>Use alliances to create a coalition, then hold every occupied province for 5 seconds.</p>
                   <p>Forests and hills defend well. Marshes slow movement. Towers make routes faster.</p>
                   <p>Every province keeps its own purse. Villages mint the most coin; the Treasury chip totals the whole realm.</p>

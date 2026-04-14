@@ -13,6 +13,7 @@ type BattlefieldProps = {
   onProvinceHover: (provinceId: string | null) => void;
   onProvincePointerDown: (provinceId: string) => void;
   onProvincePointerUp: (provinceId: string) => void;
+  onEmptyLeftClick: () => void;
 };
 
 type CameraState = {
@@ -31,10 +32,12 @@ type LatestRenderState = Pick<
   | "hoveredProvinceId"
   | "sendPreviewTargetId"
   | "tutorialHighlights"
+  | "me"
   | "onCameraAction"
   | "onProvinceHover"
   | "onProvincePointerDown"
   | "onProvincePointerUp"
+  | "onEmptyLeftClick"
 >;
 
 const MIN_SCALE = 0.45;
@@ -63,6 +66,10 @@ function terrainBaseTint(terrain: string) {
     default:
       return 0x6a6658;
   }
+}
+
+function formatProvinceCoins(value: number) {
+  return value >= 10 ? value.toFixed(0) : value.toFixed(1);
 }
 
 function blendHex(base: number, overlay: number, amount: number) {
@@ -220,6 +227,7 @@ function provinceAtScreenPoint(
 }
 
 export function PixiBattlefield({
+  me,
   snapshot,
   selectedProvinceId,
   hoveredProvinceId,
@@ -229,6 +237,7 @@ export function PixiBattlefield({
   onProvinceHover,
   onProvincePointerDown,
   onProvincePointerUp,
+  onEmptyLeftClick,
 }: BattlefieldProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<Application | null>(null);
@@ -243,6 +252,7 @@ export function PixiBattlefield({
   });
   const latestRef = useRef<LatestRenderState>({
     snapshot,
+    me,
     selectedProvinceId,
     hoveredProvinceId,
     sendPreviewTargetId,
@@ -251,10 +261,12 @@ export function PixiBattlefield({
     onProvinceHover,
     onProvincePointerDown,
     onProvincePointerUp,
+    onEmptyLeftClick,
   });
 
   latestRef.current = {
     snapshot,
+    me,
     selectedProvinceId,
     hoveredProvinceId,
     sendPreviewTargetId,
@@ -263,6 +275,7 @@ export function PixiBattlefield({
     onProvinceHover,
     onProvincePointerDown,
     onProvincePointerUp,
+    onEmptyLeftClick,
   };
 
   useEffect(() => {
@@ -349,6 +362,8 @@ export function PixiBattlefield({
           );
           if (provinceId) {
             latestRef.current.onProvincePointerUp(provinceId);
+          } else {
+            latestRef.current.onEmptyLeftClick();
           }
         }
         activeButton = null;
@@ -426,6 +441,7 @@ export function PixiBattlefield({
         renderScene(
           app,
           latest.snapshot,
+          latest.me,
           latest.selectedProvinceId,
           latest.hoveredProvinceId,
           latest.sendPreviewTargetId,
@@ -459,6 +475,7 @@ export function PixiBattlefield({
     renderScene(
       app,
       snapshot,
+      me,
       selectedProvinceId,
       hoveredProvinceId,
       sendPreviewTargetId,
@@ -469,6 +486,7 @@ export function PixiBattlefield({
       onProvincePointerUp,
     );
   }, [
+    me,
     hoveredProvinceId,
     onProvinceHover,
     onProvincePointerDown,
@@ -485,6 +503,7 @@ export function PixiBattlefield({
 function renderScene(
   app: Application,
   snapshot: MatchSnapshot,
+  me: string | null,
   selectedProvinceId: string | null,
   hoveredProvinceId: string | null,
   sendPreviewTargetId: string | null,
@@ -631,29 +650,46 @@ function renderScene(
 
   snapshot.map.provinces.forEach((province) => {
     const provinceState = snapshot.provinces[province.id];
+    const isMine = provinceState.ownerId === me;
+    const isOwned = Boolean(provinceState.ownerId);
     const ownerColor = colorForOwner(snapshot, provinceState.ownerId);
     const ownerTint = Color.shared.setValue(ownerColor).toNumber();
     const fillColor = provinceState.ownerId
-      ? blendHex(terrainBaseTint(province.terrain), ownerTint, selectedProvinceId === province.id ? 0.68 : 0.42)
+      ? blendHex(
+          terrainBaseTint(province.terrain),
+          ownerTint,
+          selectedProvinceId === province.id ? 0.8 : isMine ? 0.66 : 0.5,
+        )
       : terrainBaseTint(province.terrain);
     const graphics = new Graphics();
     const polygon = province.polygon.flatMap((point) => [point.x, point.y]);
     graphics.poly(polygon);
     graphics.fill({
       color: fillColor,
-      alpha: selectedProvinceId === province.id ? 0.96 : hoveredProvinceId === province.id ? 0.92 : 0.88,
+      alpha: selectedProvinceId === province.id ? 0.98 : isMine ? 0.95 : hoveredProvinceId === province.id ? 0.9 : isOwned ? 0.88 : 0.78,
     });
     graphics.stroke({
       color:
         selectedProvinceId === province.id
           ? 0xf8ddb2
+          : isMine
+            ? blendHex(ownerTint, 0xf0d9a7, 0.45)
           : hoveredProvinceId === province.id
             ? 0xe7d1a3
+            : isOwned
+              ? blendHex(ownerTint, 0x2d1a0d, 0.18)
             : 0x8d7354,
-      width: selectedProvinceId === province.id ? 4.5 : hoveredProvinceId === province.id ? 3.4 : 2.2,
+      width: selectedProvinceId === province.id ? 4.8 : isMine ? 3.8 : hoveredProvinceId === province.id ? 3.2 : isOwned ? 2.6 : 2.1,
       alpha: 0.95,
     });
     world.addChild(graphics);
+
+    if (isMine) {
+      const heraldicOutline = new Graphics();
+      heraldicOutline.poly(polygon);
+      heraldicOutline.stroke({ color: 0xf2dfb4, width: 1.5, alpha: 0.5 });
+      world.addChild(heraldicOutline);
+    }
 
     const label = new Text({
       text:
@@ -664,7 +700,7 @@ function renderScene(
         fontFamily: "\"Cinzel\", serif",
         fontSize:
           camera.scale < 0.7 ? 11 : province.id === selectedProvinceId ? 15 : 13,
-        fill: provinceState.ownerId ? "#fff6e7" : "#d4c5a5",
+        fill: isMine ? "#fff7dc" : provinceState.ownerId ? "#fff1de" : "#d4c5a5",
         align: "center",
         stroke: { color: "#24120a", width: 4 },
       },
@@ -676,8 +712,8 @@ function renderScene(
 
     const sigil = new Graphics();
     sigil.circle(province.center.x, province.center.y + 21, 10);
-    sigil.fill({ color: 0x25140b, alpha: 0.82 });
-    sigil.stroke({ color: 0xe1c690, width: 2 });
+    sigil.fill({ color: isOwned ? ownerTint : 0x25140b, alpha: isMine ? 0.9 : 0.82 });
+    sigil.stroke({ color: isMine ? 0xf4d9a4 : 0xe1c690, width: isMine ? 2.8 : 2 });
     if (province.coastal) {
       sigil.moveTo(province.center.x - 5, province.center.y + 21);
       sigil.lineTo(province.center.x, province.center.y + 13);
@@ -685,6 +721,22 @@ function renderScene(
       sigil.stroke({ color: 0x86c7d8, width: 2, alpha: 0.8 });
     }
     world.addChild(sigil);
+
+    if (isMine && camera.scale >= 0.72) {
+      const purseLabel = new Text({
+        text: `${formatProvinceCoins(provinceState.coinReserve)}c`,
+        style: {
+          fontFamily: "\"Source Serif 4\", serif",
+          fontSize: 11,
+          fill: "#f8e6b8",
+          align: "center",
+          stroke: { color: "#24120a", width: 3 },
+        },
+      });
+      purseLabel.anchor.set(0.5);
+      purseLabel.position.set(province.center.x, province.center.y + 39);
+      world.addChild(purseLabel);
+    }
   });
 
   if (selectedProvinceId && sendPreviewTargetId) {
