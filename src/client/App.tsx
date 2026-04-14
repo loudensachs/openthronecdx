@@ -143,6 +143,7 @@ export function App() {
   const [tutorialMode, setTutorialMode] = useState(false);
   const [tutorialStep, setTutorialStep] = useState(0);
   const [tutorialCamera, setTutorialCamera] = useState({ pan: false, zoom: false });
+  const sessionRef = useRef(0);
   const previousCoinsRef = useRef<number | null>(null);
   const coinGainBufferRef = useRef(0);
   const pendingSpendRef = useRef<{ label: string; expiresAtTick: number } | null>(null);
@@ -215,6 +216,15 @@ export function App() {
 
   const tutorialPlan = tutorialMode ? tutorialPlanRef.current : null;
 
+  function beginConnectionSession() {
+    sessionRef.current += 1;
+    return sessionRef.current;
+  }
+
+  function invalidateConnectionSession() {
+    sessionRef.current += 1;
+  }
+
   function pushCoinIndicator(label: string, positive: boolean) {
     const id = coinIndicatorIdRef.current + 1;
     coinIndicatorIdRef.current = id;
@@ -238,6 +248,19 @@ export function App() {
     pendingSpendRef.current = null;
     tutorialPlanRef.current = null;
     tutorialBaselineRef.current = null;
+  }
+
+  function leaveToLanding() {
+    invalidateConnectionSession();
+    connection?.close();
+    setConnection(null);
+    setLobby(null);
+    setSnapshot(null);
+    setTutorialMode(false);
+    setTutorialStep(0);
+    setError(null);
+    resetMatchUi();
+    setScreen("landing");
   }
 
   useEffect(() => {
@@ -356,9 +379,10 @@ export function App() {
     }
   }, [tutorialMode, tutorialStep]);
 
-  function wireHandlers() {
+  function wireHandlers(sessionId: number) {
     return {
       onBootstrap: (payload: MatchBootstrap) => {
+        if (sessionRef.current !== sessionId) return;
         setLobby(payload.lobby);
         if (payload.snapshot) {
           setSnapshot(payload.snapshot);
@@ -368,6 +392,7 @@ export function App() {
         }
       },
       onLobby: (payload: LobbyState) => {
+        if (sessionRef.current !== sessionId) return;
         setLobby(payload);
         if (payload.privacy === "public" && runtimeHost) {
           void upsertDirectoryEntry(runtimeHost, {
@@ -382,13 +407,18 @@ export function App() {
         }
       },
       onSnapshot: (payload: MatchSnapshot) => {
+        if (sessionRef.current !== sessionId) return;
         setSnapshot(payload);
         setScreen("match");
       },
       onPatch: (payload: Parameters<typeof applyPatch>[1]) => {
+        if (sessionRef.current !== sessionId) return;
         setSnapshot((current) => (current ? applyPatch(current, payload) : current));
       },
-      onError: (message: string) => setError(message),
+      onError: (message: string) => {
+        if (sessionRef.current !== sessionId) return;
+        setError(message);
+      },
     };
   }
 
@@ -400,10 +430,11 @@ export function App() {
 
   function connectToPartyRoom(roomId: string) {
     if (!runtimeHost) return;
+    const sessionId = beginConnectionSession();
     setTutorialMode(false);
     setTutorialStep(0);
     resetMatchUi();
-    const nextConnection = connectPartyRoom(runtimeHost, roomId, profile, wireHandlers());
+    const nextConnection = connectPartyRoom(runtimeHost, roomId, profile, wireHandlers(sessionId));
     setConnection(nextConnection);
     setLobby(null);
     setSnapshot(null);
@@ -411,15 +442,17 @@ export function App() {
   }
 
   function startSkirmish() {
+    const sessionId = beginConnectionSession();
     setTutorialMode(false);
     setTutorialStep(0);
     resetMatchUi();
-    const nextConnection = connectSkirmish(profile, desiredBots, selectedMapId, wireHandlers());
+    const nextConnection = connectSkirmish(profile, desiredBots, selectedMapId, wireHandlers(sessionId));
     setConnection(nextConnection);
     setScreen("match");
   }
 
   function startTutorial() {
+    const sessionId = beginConnectionSession();
     setTutorialMode(true);
     setTutorialStep(0);
     resetMatchUi();
@@ -427,7 +460,7 @@ export function App() {
     setDesiredBots(1);
     setPanelOpen(true);
     setActiveTab("chronicle");
-    const nextConnection = connectSkirmish(profile, 1, "crownfall", wireHandlers());
+    const nextConnection = connectSkirmish(profile, 1, "crownfall", wireHandlers(sessionId));
     setConnection(nextConnection);
     setScreen("match");
   }
@@ -922,7 +955,7 @@ export function App() {
             </button>
           </div>
 
-          {hoveredProvince && hoveredProvinceMeta && (
+          {!tutorialMode && hoveredProvince && hoveredProvinceMeta && (
             <div className="province-inspector parchment-panel">
               <strong>{hoveredProvinceMeta.name}</strong>
               <span>{hoveredProvinceMeta.country}</span>
@@ -951,6 +984,19 @@ export function App() {
               </div>
               <p>{tutorialBody}</p>
               {tutorialHint && <p className="tutorial-hint">{tutorialHint}</p>}
+              {hoveredProvince && hoveredProvinceMeta && (
+                <div className="tutorial-hover-card">
+                  <strong>{hoveredProvinceMeta.name}</strong>
+                  <span>
+                    {hoveredProvinceMeta.country} · {hoveredProvinceMeta.continent}
+                  </span>
+                  <span>
+                    {hoveredProvinceMeta.terrain}
+                    {hoveredProvinceMeta.coastal ? " · coastal port" : ""}
+                  </span>
+                  <span>Levies {Math.floor(hoveredProvince.levies)} · Purse {formatCoins(hoveredProvince.coinReserve)}c</span>
+                </div>
+              )}
               <div className="tutorial-objectives">
                 {tutorialObjectives.map((objective, index) => (
                   <div
@@ -1208,16 +1254,7 @@ export function App() {
                     </button>
                     <button
                       className="iron-button"
-                      onClick={() => {
-                        connection?.close();
-                        setConnection(null);
-                        setLobby(null);
-                        setSnapshot(null);
-                        setTutorialMode(false);
-                        setTutorialStep(0);
-                        resetMatchUi();
-                        setScreen("landing");
-                      }}
+                      onClick={leaveToLanding}
                     >
                       Return to Landing
                     </button>
@@ -1243,16 +1280,7 @@ export function App() {
                 <p>Alliances broken: {snapshot.stats.alliancesBroken}</p>
                 <button
                   className="royal-button"
-                  onClick={() => {
-                    connection?.close();
-                    setConnection(null);
-                    setLobby(null);
-                    setSnapshot(null);
-                    setTutorialMode(false);
-                    setTutorialStep(0);
-                    resetMatchUi();
-                    setScreen("landing");
-                  }}
+                  onClick={leaveToLanding}
                 >
                   Return to Court
                 </button>

@@ -391,6 +391,15 @@ select {
   color: #684a34;
 }
 
+.tutorial-hover-card {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 16px;
+  background: rgba(96, 67, 33, 0.08);
+  border: 1px solid rgba(112, 76, 33, 0.22);
+}
+
 .tutorial-progress {
   font-weight: 700;
   color: #684a34;
