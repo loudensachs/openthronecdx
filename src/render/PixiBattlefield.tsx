@@ -39,7 +39,7 @@ type LatestRenderState = Pick<
 
 const MIN_SCALE = 0.45;
 const MAX_SCALE = 1.55;
-const CAMERA_PADDING = 80;
+const CAMERA_PADDING = 16;
 const WORLD_LABEL_STYLE = {
   fontFamily: "\"Cinzel\", serif",
   fill: "#f0e0b8",
@@ -144,6 +144,16 @@ function screenToWorld(camera: CameraState, x: number, y: number) {
   return {
     x: (x - camera.x) / camera.scale,
     y: (y - camera.y) / camera.scale,
+  };
+}
+
+function canvasPointFromClient(app: Application, clientX: number, clientY: number) {
+  const rect = app.canvas.getBoundingClientRect();
+  const scaleX = app.canvas.width / rect.width;
+  const scaleY = app.canvas.height / rect.height;
+  return {
+    x: (clientX - rect.left) * scaleX,
+    y: (clientY - rect.top) * scaleY,
   };
 }
 
@@ -257,9 +267,11 @@ export function PixiBattlefield({
       centerCamera(camera, app.screen.width, app.screen.height, latestRef.current.snapshot);
       onWheel = (event: WheelEvent) => {
         event.preventDefault();
-        const rect = app.canvas.getBoundingClientRect();
-        const screenX = event.clientX - rect.left;
-        const screenY = event.clientY - rect.top;
+        const { x: screenX, y: screenY } = canvasPointFromClient(
+          app,
+          event.clientX,
+          event.clientY,
+        );
         const worldX = (screenX - camera.x) / camera.scale;
         const worldY = (screenY - camera.y) / camera.scale;
         const nextScale = clamp(
@@ -278,10 +290,11 @@ export function PixiBattlefield({
         const wantsPan = event.button === 2;
         if (!wantsPan) return;
         event.preventDefault();
+        const point = canvasPointFromClient(app, event.clientX, event.clientY);
         camera.dragging = true;
         hasDragged = false;
-        camera.lastX = event.clientX;
-        camera.lastY = event.clientY;
+        camera.lastX = point.x;
+        camera.lastY = point.y;
         app.canvas.style.cursor = "grabbing";
       };
       onPointerUp = () => {
@@ -290,16 +303,17 @@ export function PixiBattlefield({
       };
       onPointerMove = (event: PointerEvent) => {
         if (!camera.dragging) return;
-        const dx = event.clientX - camera.lastX;
-        const dy = event.clientY - camera.lastY;
+        const point = canvasPointFromClient(app, event.clientX, event.clientY);
+        const dx = point.x - camera.lastX;
+        const dy = point.y - camera.lastY;
         if (!hasDragged && Math.hypot(dx, dy) > 3) {
           latestRef.current.onCameraAction("pan");
           hasDragged = true;
         }
         camera.x += dx;
         camera.y += dy;
-        camera.lastX = event.clientX;
-        camera.lastY = event.clientY;
+        camera.lastX = point.x;
+        camera.lastY = point.y;
         clampCamera(camera, app.screen.width, app.screen.height, latestRef.current.snapshot);
       };
       onContextMenu = (event: MouseEvent) => event.preventDefault();
